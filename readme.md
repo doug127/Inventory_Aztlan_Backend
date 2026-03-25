@@ -49,9 +49,9 @@
 - [x] 4.2 Unidades
 - [x] 4.3 Productos
 - [x] 5 Stock
-- [ ] 6 Movimientos
-- [ ] 7 Activos
-- [ ] 8 Destino de Movimientos
+- [x] 6 Movimientos
+- [x] 7 Activos
+- [x] 8 Destino de Movimientos
 - [ ] 9 Reportes
 
 # Cada modulo cuenta con su carpeta de testing para validar pruebas de forma automatizada.
