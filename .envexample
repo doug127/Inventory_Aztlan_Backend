@@ -1,0 +1,15 @@
+# Entorno
+NODE_ENV=development # production | development | test
+PORT=3000
+
+# Configuración de la base de datos
+DB_DIALECT=postgres # postgres | mysql | sqlite | mssql
+DB_HOST=localhost 
+DB_PORT=5432
+DB_NAME=db_name
+DB_USER=postgres
+DB_PASSWORD=your_password
+
+# Seguridad / Auth
+JWT_SECRET=una_clave_super_secreta
+SESSION_SECRET=otra_clave_secreta
