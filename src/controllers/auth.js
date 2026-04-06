@@ -17,7 +17,8 @@ export const loginController = async (req, res) => {
                 user: {
                     id: user.id,
                     username: user.username,
-                    role: user.role
+                    role: user.role.name,
+                    hierarchy_level: user.role.hierarchy_level
                 }
             });        
     } catch (error) {
@@ -31,7 +32,8 @@ export const me = (req, res) => {
         res.json({ 
             id: req.user.id,
             username: req.user.username,
-            role: req.user.role
+            role: req.user.role,
+            hierarchy_level: req.user.hierarchy_level
         });
     } else {
         res.status(401).json({ error: 'No autenticado' });
