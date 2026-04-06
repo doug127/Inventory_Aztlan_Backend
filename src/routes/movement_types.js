@@ -1,6 +1,6 @@
 import express from "express";
 import { auth } from "../middlewares/auth.js";
-import { authorizePrivilege, authorizeHierarchy } from '../middlewares/authorize.js';
+import { authorizeRole } from '../middlewares/authorize.js';
 import {
   createMovementTypeController,
   getAllMovementTypesController,
@@ -8,31 +8,26 @@ import {
   updateMovementTypeController,
   deleteMovementTypeController
 } from "../controllers/movement_types.js";
-import {
-  level_hierarchy as lh
-} from '../utils/level_hierarchy.js';
+import { ROLE_NAMES } from '../utils/ROLE_NAMES.js';
 
 const router = express.Router();
 
-router.get("/", auth, getAllMovementTypesController);
-router.get("/:id", auth, getMovementTypeByIdController);
+router.get("/", auth, authorizeRole(ROLE_NAMES.USER), getAllMovementTypesController);
+router.get("/:id", auth, authorizeRole(ROLE_NAMES.USER), getMovementTypeByIdController);
 router.post(
     "/modify", 
     auth, 
-    authorizePrivilege('movements.modify'), 
-    authorizeHierarchy(lh.SUPERADMIN),
+    authorizeRole(ROLE_NAMES.SUPERADMIN),
     createMovementTypeController);
 router.patch(
     "/:id", 
     auth, 
-    authorizePrivilege('movements.modify'), 
-    authorizeHierarchy(lh.SUPERADMIN),
+    authorizeRole(ROLE_NAMES.SUPERADMIN),
     updateMovementTypeController);
 router.delete(
     "/:id", 
     auth,
-    authorizePrivilege('movements.modify'), 
-    authorizeHierarchy(lh.SUPERADMIN),
+    authorizeRole(ROLE_NAMES.SUPERADMIN), 
     deleteMovementTypeController
 );
 

@@ -11,6 +11,10 @@ export const up = async (queryInterface, Sequelize) => {
             allowNull: false,
             unique: true
         },
+        hierarchy_level: {
+            type: Sequelize.INTEGER,
+            allowNull: false
+        },
         description: {
             type: Sequelize.STRING,
             allowNull: true

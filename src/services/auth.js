@@ -19,12 +19,7 @@ export const login = async (username, password) => {
         { 
             id: user.id, 
             username: user.username, 
-            role: user.role.name,
-            privileges: user.role.privileges.map(p => ({
-                name: p.name,
-                hierarchy: p.hierarchy,
-                description: p.description
-            }))
+            role: user.role.name
         },
         process.env.JWT_SECRET,
         { expiresIn: '1h' }

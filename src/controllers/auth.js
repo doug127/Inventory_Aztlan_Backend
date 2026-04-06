@@ -31,8 +31,7 @@ export const me = (req, res) => {
         res.json({ 
             id: req.user.id,
             username: req.user.username,
-            role: req.user.role,
-            privilege: req.user.privileges
+            role: req.user.role
         });
     } else {
         res.status(401).json({ error: 'No autenticado' });

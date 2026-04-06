@@ -11,6 +11,10 @@ export const Role = sequelize.define('roles', {
         type: DataTypes.STRING, 
         unique: true 
     },
+    hierarchy_level: {
+        type: DataTypes.INTEGER,
+        allowNull: false
+    },
     description: { 
         type: DataTypes.STRING 
     },

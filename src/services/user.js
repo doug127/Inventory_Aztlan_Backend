@@ -98,7 +98,6 @@ export const updateUser = async ({ id, data, currentUser }) => {
   }
 };
 
-
 export const deleteUser = async (id) => {
     try {
         await deleteUserRepository(id);
