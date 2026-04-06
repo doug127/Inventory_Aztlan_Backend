@@ -6,18 +6,13 @@ import {
     getProductMovementsController
 } from "../controllers/movement.js";
 import { auth } from "../middlewares/auth.js";
-import { authorizeHierarchy, authorizePrivilege } from "../middlewares/authorize.js";
-import { level_hierarchy } from "../utils/level_hierarchy.js";
-
+import { authorizeRole } from "../middlewares/authorize.js";
+import { ROLE_NAMES } from "../utils/ROLE_NAMES.js";
 const router = Router();
 
-router.get('/', auth, getAllMovementsControllers);
-router.get('/:id', auth, getMovementByIdController);
-router.get('/product/:id', auth, getProductMovementsController);
-router.post('/', 
-    auth, 
-    authorizeHierarchy(level_hierarchy.ADMIN), 
-    createMovementController
-);
+router.get('/', auth, authorizeRole(ROLE_NAMES.USER), getAllMovementsControllers);
+router.get('/:id', auth, authorizeRole(ROLE_NAMES.USER), getMovementByIdController);
+router.get('/product/:id', auth, authorizeRole(ROLE_NAMES.USER), getProductMovementsController);
+router.post('/', auth, authorizeRole(ROLE_NAMES.ADMIN), createMovementController);
 
 export default router;

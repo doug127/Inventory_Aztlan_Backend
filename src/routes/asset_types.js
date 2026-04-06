@@ -1,6 +1,6 @@
 import { Router } from 'express';
 import { auth } from "../middlewares/auth.js";
-import { authorizePrivilege, authorizeHierarchy } from '../middlewares/authorize.js';
+import { authorizeRole } from '../middlewares/authorize.js';
 import {
     getAllAssetTypesController,
     getAssetTypeByIdController,
@@ -8,9 +8,7 @@ import {
     updateAssetTypeController,
     deleteAssetTypeController
 } from '../controllers/asset_types.js';
-import {
-  level_hierarchy as lh
-} from '../utils/level_hierarchy.js';
+import { ROLE_NAMES } from '../utils/ROLE_NAMES.js';
 
 const router = Router();
 
@@ -19,22 +17,19 @@ router.get("/:id", auth, getAssetTypeByIdController);
 router.post(
     "/create", 
     auth, 
-    authorizePrivilege('asset_type.modify'), 
-    authorizeHierarchy(lh.ADMIN),
+    authorizeRole(ROLE_NAMES.ADMIN),
     createAssetTypeController
 );
 router.patch(
     "/:id", 
     auth, 
-    authorizePrivilege('asset_type.modify'), 
-    authorizeHierarchy(lh.ADMIN),
+    authorizeRole(ROLE_NAMES.ADMIN),
     updateAssetTypeController
 );
 router.delete(
     "/:id", 
     auth,
-    authorizePrivilege('asset_type.modify'), 
-    authorizeHierarchy(lh.ADMIN),
+    authorizeRole(ROLE_NAMES.ADMIN),
     deleteAssetTypeController
 );
 

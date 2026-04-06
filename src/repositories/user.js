@@ -1,11 +1,11 @@
-import { User, Role, Privilege } from '../models/index.js';
+import { User, Role } from '../models/index.js';
 
 export const findUserByUsername = (username) => {
   return User.findOne({
     where: { username, is_active: true },
     include: {
       model: Role,
-      include: Privilege
+      attributes: ['id', 'name', 'hierarchy_level' ,'description']
     }
   });
 };
@@ -13,8 +13,7 @@ export const findUserByUsername = (username) => {
 export const findAllUsersRepository = async () => {
     return await User.findAll({ 
       include: {
-        model: Role,
-        include: Privilege
+        model: Role
       } 
     });
 };

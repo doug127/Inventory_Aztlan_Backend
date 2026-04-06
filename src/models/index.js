@@ -1,7 +1,6 @@
 import sequelize from '../config/config.cjs';
 import {User} from './User.js';
 import {Role} from './Role.js';
-import {Privilege} from './Privilege.js';
 import {CategoryProduct} from './CategoryProduct.js';
 import {Unit} from './Unit.js';
 import {Product} from './Product.js';
@@ -18,17 +17,6 @@ import {MovementTarget} from './MovementTarget.js';
 // * Relación uno a muchos entre Role y User
 Role.hasMany(User, { foreignKey: 'id' });
 User.belongsTo(Role, { foreignKey: 'role_id' });
-
-// * relación muchos a muchos entre Role y Privilege
-Role.belongsToMany(Privilege, {
-  through: 'role_privileges',
-  foreignKey: 'role_id'
-});
-
-Privilege.belongsToMany(Role, {
-  through: 'role_privileges',
-  foreignKey: 'privilege_id'
-});
 
 // * Relación uno a muchos entre CategoryProduct y Product
 CategoryProduct.hasMany(Product, { foreignKey: 'product_category_id' });
@@ -89,7 +77,6 @@ MovementTarget.belongsTo(Asset, {foreignKey: 'asset_id'});
 export {
   User,
   Role,
-  Privilege,
   CategoryProduct,
   Product,
   Unit,
