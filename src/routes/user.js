@@ -3,6 +3,7 @@ import { auth } from '../middlewares/auth.js';
 import { authorizeRole } from '../middlewares/authorize.js';
 import { 
   getUsersController,
+  getUserByIdController,
   createUserController,
   updateUserController,
   deleteUserController
@@ -12,6 +13,7 @@ import { ROLE_NAMES } from '../utils/ROLE_NAMES.js';
 const router = Router();
 
 router.get('/', auth, authorizeRole(ROLE_NAMES.USER), getUsersController);
+router.get('/:id', auth, authorizeRole(ROLE_NAMES.USER), getUserByIdController);
 router.post('/create', auth, authorizeRole(ROLE_NAMES.ADMIN), createUserController);
 router.put('/update/:id', auth, authorizeRole(ROLE_NAMES.ADMIN), updateUserController);
 router.delete('/destroy/:id', auth, authorizeRole(ROLE_NAMES.SUPERADMIN), deleteUserController);

@@ -12,9 +12,19 @@ export const findUserByUsername = (username) => {
 
 export const findAllUsersRepository = async () => {
     return await User.findAll({ 
+      attributes: { exclude: ['password'] },
       include: {
         model: Role
       } 
+    });
+};
+
+export const findUserByIdRepository = async (id) => {
+    return await User.findByPk(id, {
+      attributes: { exclude: ['password'] },
+      include: {
+        model: Role
+      }
     });
 };
 

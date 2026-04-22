@@ -1,10 +1,10 @@
 import bcrypt from 'bcrypt';
 import {
     findAllUsersRepository,
+    findUserByIdRepository,
     createUserRepository,
     updateUserRepository,
     deleteUserRepository
-
 } from '../repositories/user.js';
 import { findRoleByName } from '../repositories/role.js';
 import {
@@ -13,14 +13,22 @@ import {
     validatePassword
 } from '../dtos/user.js';
 
-export const getAllUsers = async () => {
+export const getAllUsersService = async () => {
     if (!await findAllUsersRepository()) {
         throw new Error('No se encontraron usuarios');
     }
     return await findAllUsersRepository();
 }
 
-export const createUser = async ({ data, currentUser }) => {
+export const getUserByIdService = async (id) => {
+    const user = await findUserByIdRepository(id);
+    if (!user) {
+        throw new Error('Usuario no encontrado');
+    }
+    return user;
+}
+
+export const createUserService = async ({ data, currentUser }) => {
   let { username, fullname, password, role_id } = data;
 
   if (!['admin', 'superadmin'].includes(currentUser.role)) {
@@ -57,7 +65,7 @@ export const createUser = async ({ data, currentUser }) => {
   });
 };
 
-export const updateUser = async ({ id, data, currentUser }) => {
+export const updateUserService = async ({ id, data, currentUser }) => {
   try {
     let { username, fullname, password, role_id } = data;
 
@@ -98,7 +106,7 @@ export const updateUser = async ({ id, data, currentUser }) => {
   }
 };
 
-export const deleteUser = async (id) => {
+export const deleteUserService = async (id) => {
     try {
         await deleteUserRepository(id);
         return;

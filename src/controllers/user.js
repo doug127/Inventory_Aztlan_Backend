@@ -1,14 +1,24 @@
 import {
-    getAllUsers,
-    createUser as createUserService,
-    updateUser as updateUserService,
-    deleteUser as deleteUserService
+    getAllUsersService,
+    getUserByIdService,
+    createUserService,
+    updateUserService,
+    deleteUserService
 } from '../services/user.js';
 
 export const getUsersController = async (req, res) => {
     try {
-        const users = await getAllUsers();
+        const users = await getAllUsersService();
         res.status(200).json(users);
+    } catch (error) {
+        res.status(500).json({ error: error.message });
+    }
+};
+
+export const getUserByIdController = async (req, res) => {
+    try {
+        const user = await getUserByIdService(req.params.id);
+        res.status(200).json(user);
     } catch (error) {
         res.status(500).json({ error: error.message });
     }
