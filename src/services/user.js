@@ -2,6 +2,7 @@ import bcrypt from 'bcrypt';
 import {
     findAllUsersRepository,
     findUserByIdRepository,
+    findUserWithRoleByIdRepository,
     createUserRepository,
     updateUserRepository,
     deleteUserRepository
@@ -13,11 +14,22 @@ import {
     validatePassword
 } from '../dtos/user.js';
 
-export const getAllUsersService = async () => {
-    if (!await findAllUsersRepository()) {
+export const getAllUsersService = async (currentUser) => {
+    const userWithRole = await findUserWithRoleByIdRepository(currentUser.id);
+
+    if (!userWithRole) {
+        throw new Error('Usuario no encontrado');
+    }
+
+    const currentLevel = userWithRole.role.hierarchy_level;
+
+    const users = await findAllUsersRepository(currentLevel);
+
+    if (!users || users.length === 0) {
         throw new Error('No se encontraron usuarios');
     }
-    return await findAllUsersRepository();
+
+    return users;
 }
 
 export const getUserByIdService = async (id) => {
