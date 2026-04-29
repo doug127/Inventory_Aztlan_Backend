@@ -26,5 +26,5 @@ export const login = async (username, password) => {
         { expiresIn: '1h' }
     );
 
-    return { ...user.get(), token };
+    return { user, token };
 };

@@ -1,4 +1,5 @@
 import { User, Role } from '../models/index.js';
+import { Op } from 'sequelize';
 
 export const findUserByUsername = (username) => {
   return User.findOne({
@@ -10,11 +11,35 @@ export const findUserByUsername = (username) => {
   });
 };
 
-export const findAllUsersRepository = async () => {
+export const findUserWithRoleByIdRepository = async (id) => {
+    return await User.findByPk(id, {
+        include: {
+            model: Role
+        }
+    });
+};
+
+export const findAllUsersRepository = async (currentLevel) => {
     return await User.findAll({ 
+      attributes: { exclude: ['password'] },
+      include: {
+        model: Role,
+        required: true,
+        where: {
+            hierarchy_level: {
+                [Op.lte]: currentLevel
+            }
+        }
+      } 
+    });
+};
+
+export const findUserByIdRepository = async (id) => {
+    return await User.findByPk(id, {
+      attributes: { exclude: ['password'] },
       include: {
         model: Role
-      } 
+      }
     });
 };
 
