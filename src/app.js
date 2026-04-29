@@ -5,7 +5,7 @@ import cors from 'cors';
 import express from 'express';
 import session from 'express-session';
 import cookieParser from 'cookie-parser';
-import routes from './routes/index.js';
+import routes from './shared/routes/index.route.js';
 import { runServer } from './server.js';
 
 const app = express();

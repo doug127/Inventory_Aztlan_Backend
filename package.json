@@ -11,7 +11,7 @@
     "test:coverage": "vitest run --coverage"
   },
   "imports": {
-    "@/": "./src/"
+    "#src/*": "./src/*"
   },
   "keywords": [],
   "author": "",

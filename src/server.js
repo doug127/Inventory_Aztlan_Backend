@@ -1,4 +1,4 @@
-import { sequelize } from '../src/config/database.js';
+import { sequelize } from '#src/config/database.js';
 
 export const runServer = async (app) => {
     try {
@@ -12,4 +12,4 @@ export const runServer = async (app) => {
     } catch (error) {
         console.error('❌ Unable to connect to the database:', error);
     }
-}
+};
