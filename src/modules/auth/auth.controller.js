@@ -2,16 +2,10 @@ import { login } from './auth.service.js';
 
 export const loginController = async (req, res) => {
     try {
-        const { username, password } = req.body;
+        const { username, password } = req.validatedData;
 
         const { user, token } = await login(username, password);
         
-        const loginDTO = {
-            id: user.id,
-            username: user.username,
-            role: user.role.name,
-            hierarchy_level: user.role.hierarchy_level
-        };
         res
             .cookie('session', token, {
                 httpOnly: true,
@@ -21,7 +15,7 @@ export const loginController = async (req, res) => {
             })
             .json({ 
                 message: 'Login exitoso', 
-                user: loginDTO
+                user
             });        
     } catch (error) {
         res.status(401).json({ error: error.message });

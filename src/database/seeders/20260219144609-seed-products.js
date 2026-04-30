@@ -1,4 +1,4 @@
-import { products} from "../utils/products.js";
+import { products} from "#src/shared/utils/products.js";
 
 export const up = async (queryInterface, Sequelize) => {
   const now = new Date();

@@ -1,6 +1,7 @@
 import bcrypt from 'bcrypt';
 import jwt from 'jsonwebtoken';
 import { findUserByUsername } from '../user/user.repository.js';
+import { authDTO } from './auth.dto.js';
 
 export const login = async (username, password) => {    
     const user = await findUserByUsername(username);
@@ -15,16 +16,11 @@ export const login = async (username, password) => {
         throw new Error('Credenciales Inválidas');
     }
 
-    const token = jwt.sign(
-        { 
-            id: user.id, 
-            username: user.username, 
-            role: user.role.name,
-            hierarchy_level: user.role.hierarchy_level
-        },
-        process.env.JWT_SECRET,
-        { expiresIn: '1h' }
-    );
+    const payload = authDTO(user);
 
-    return { user, token };
+    const token = jwt.sign( payload, process.env.JWT_SECRET, { 
+        expiresIn: '1h' 
+    });
+
+    return { user: payload, token };
 };

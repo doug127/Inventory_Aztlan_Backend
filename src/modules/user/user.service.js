@@ -8,11 +8,7 @@ import {
     deleteUserRepository
 } from './user.repository.js';
 import { findRoleByName } from '../role/role.repository.js';
-import {
-    validateUsername,
-    validateFullname,
-    validatePassword
-} from './user.schema.js';
+import { userResponseDTO } from './user.dto.js';
 
 export const getAllUsersService = async (currentUser) => {
     const userWithRole = await findUserWithRoleByIdRepository(currentUser.id);
@@ -29,7 +25,9 @@ export const getAllUsersService = async (currentUser) => {
         throw new Error('No se encontraron usuarios');
     }
 
-    return users;
+    const payload = users.map(user => userResponseDTO(user));
+
+    return payload;
 }
 
 export const getUserByIdService = async (id) => {
@@ -37,7 +35,9 @@ export const getUserByIdService = async (id) => {
     if (!user) {
         throw new Error('Usuario no encontrado');
     }
-    return user;
+
+    const payload = userResponseDTO(user);
+    return payload;
 }
 
 export const createUserService = async ({ data, currentUser }) => {
@@ -46,10 +46,6 @@ export const createUserService = async ({ data, currentUser }) => {
   if (!['admin', 'superadmin'].includes(currentUser.role)) {
     throw new Error('No tienes permiso para crear usuarios');
   }
-
-  validateUsername(username);
-  validateFullname(fullname);
-  validatePassword(password);
 
   username = username.toLowerCase();
   fullname = fullname.toUpperCase();
@@ -69,12 +65,14 @@ export const createUserService = async ({ data, currentUser }) => {
     finalRoleId = userRole.id;
   }
 
-  return createUserRepository({
+  const user = await createUserRepository({
     username,
     fullname,
     password: hashedPassword,
     role_id: finalRoleId
   });
+
+  return userResponseDTO(user);
 };
 
 export const updateUserService = async ({ id, data, currentUser }) => {
@@ -86,17 +84,14 @@ export const updateUserService = async ({ id, data, currentUser }) => {
     }
 
     if (username) {
-      validateUsername(username);
       data.username = username.toLowerCase();
     }
 
     if (fullname) {
-      validateFullname(fullname);
       data.fullname = fullname.toUpperCase();
     }
 
     if (password) {
-      validatePassword(password);
       data.password = await bcrypt.hash(password, 10);
     }
 
@@ -111,8 +106,10 @@ export const updateUserService = async ({ id, data, currentUser }) => {
       data.role_id = role_id;
     }
 
-    return await updateUserRepository(id, data);
+    const user = await updateUserRepository(id, data);
 
+    return userResponseDTO(user);
+    
   } catch (error) {
     throw new Error(error.message);
   }

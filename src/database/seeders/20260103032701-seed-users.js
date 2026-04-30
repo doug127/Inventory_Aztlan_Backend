@@ -15,7 +15,7 @@ export const up = async (queryInterface, Sequelize) => {
     throw new Error('Roles requeridos no existen');
   }
 
-  const passwordHash = await bcrypt.hash('123', 10);
+  const passwordHash = await bcrypt.hash('SNKs405.', 10);
 
   await queryInterface.bulkInsert('users', [
     {

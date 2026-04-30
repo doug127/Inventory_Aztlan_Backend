@@ -27,12 +27,11 @@ export const getUserByIdController = async (req, res) => {
 export const createUserController = async (req, res) => {
     try {
         const newUser = await createUserService({
-            data: req.body,
+            data: req.validatedData,
             currentUser: req.user
         });
-
-        const { password, ...userWithoutPassword } = newUser.toJSON();
-        res.status(201).json(userWithoutPassword);
+ 
+        res.status(201).json(newUser);
     } catch (error) {
         res.status(500).json({ error: error.message });
     }
@@ -42,7 +41,7 @@ export const updateUserController = async (req, res) => {
     try {
         const updatedUser = await updateUserService({
             id: req.params.id,
-            data: req.body,
+            data: req.validatedData,
             currentUser: req.user
         });
         res.status(200).json(updatedUser);

@@ -5,12 +5,14 @@ import {
     updateAssetRepository,
     deleteAssetRepository
 } from "./asset.repository.js";
-import { assetsDTO } from "./asset.schema.js";
+import { assetDTO } from "./asset.dto.js";
 
 export const getAllAssetsService = async () => {
     const types = await getAllAssetsRepository();
+    
+    const payload = types.map(assetDTO);
 
-    return types;
+    return payload;
 };
 
 export const getAssetByIdService = async (id) => {
@@ -26,17 +28,18 @@ export const getAssetByIdService = async (id) => {
         throw new Error("Activo no encontrado");
     }
 
-    return asset;
+    const payload = assetDTO(asset);
+
+    return payload;
 };
 
 export const createAssetService = async (data) => {
-    const assetDTO = new assetsDTO(data);
-
-    const dto = assetDTO.validate();
-
-    const asset = await createAssetRepository(dto);
-        
-    return asset;
+    
+    const asset = await createAssetRepository(data);
+    
+    const payload = assetDTO(asset);
+    
+    return payload;
 };
 
 export const updateAssetService = async (id, data) => {
@@ -50,12 +53,11 @@ export const updateAssetService = async (id, data) => {
         throw new Error("Activo no encontrado");
     }
 
-    const assetDTO = new assetsDTO(data);
-    const dto = assetDTO.validate();
+    const updatedAsset = await updateAssetRepository(asset, data);
 
-    const updatedAsset = await updateAssetRepository(asset, dto);
+    const payload = assetDTO(updatedAsset);
 
-    return updatedAsset;
+    return payload;
 };
 
 export const deleteAssetService = async (id) => {

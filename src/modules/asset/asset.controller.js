@@ -8,7 +8,7 @@ import {
 
 export const createAssetController = async (req, res) => {
     try {
-        const data = await createAssetService(req.body);
+        const data = await createAssetService(req.validatedData);
         res.status(201).json(data);
     } catch (error) {
         res.status(400).json({ message: error.message });
@@ -35,7 +35,7 @@ export const getAssetByIdController = async (req, res) => {
 
 export const updateAssetController = async (req, res) => {
     try {
-        const data = await updateAssetService(req.params.id, req.body);
+        const data = await updateAssetService(req.params.id, req.validatedData);
         res.json(data);
     } catch (error) {
         res.status(400).json({ message: error.message });

@@ -1,4 +1,4 @@
-import { categories } from "../utils/categories.js";
+import { categories } from "#src/shared/utils/categories.js";
 
 export const up = async (queryInterface, Sequelize) => {
   await queryInterface.bulkInsert('category_products', [

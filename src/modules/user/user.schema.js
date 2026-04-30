@@ -1,56 +1,28 @@
-export const validateUsername = (username) => {
-    if(!username) {
-        throw new Error('El nombre de usuario es obligatorio');
-    }
-    if(username.length < 3) {
-        throw new Error('El nombre de usuario debe tener al menos 3 caracteres');
-    }
-    if(username.length > 30) {
-        throw new Error('El nombre de usuario no debe exceder los 30 caracteres');
-    }
-    if(username.includes(' ')) {
-        throw new Error('El nombre de usuario no debe contener espacios');
-    }
-}
+import { z } from 'zod';
 
-export const validateFullname = (fullname) => {
-    if(!fullname) {
-        throw new Error('El nombre completo es obligatorio');
-    }
-    if(fullname.length < 3) {
-        throw new Error('El nombre completo debe tener al menos 3 caracteres');
-    }
-    if(fullname.length > 100) {
-        throw new Error('El nombre completo no debe exceder los 100 caracteres');
-    }
-    if(fullname.includes('  ')) {
-        throw new Error('El nombre completo no debe contener espacios dobles');
-    }
-    if(!/^[A-Za-zÁÉÍÓÚáéíóúÑñÜü\s]+$/.test(fullname)) {
-        throw new Error('El nombre completo solo debe contener letras y espacios');
-    }
-    if(fullname.trim().split(' ').length < 2) {
-        throw new Error('El nombre completo debe contener al menos un nombre y un apellido');
-    }
-}
-
-export const validatePassword = (password) => {
-    if(!password) {
-        throw new Error('La contraseña es obligatoria');
-    }
-    if(password.length < 8) {
-        throw new Error('La contraseña debe tener al menos 8 caracteres');
-    }
-    if(password.length > 100) {
-        throw new Error('La contraseña no debe exceder los 100 caracteres');
-    }
-    if(password.includes(' ')) {
-        throw new Error('La contraseña no debe contener espacios');
-    }
-
-    const passwordRegex = /^(?=.*[a-z])(?=.*[A-Z])(?=.*\d)(?=.*[@$!%*?&.,-_])[A-Za-z\d@$!%*?&.,-_]{8,}$/;
-        
-    if(!password.match(passwordRegex)) {
-        throw new Error('La contraseña debe tener al menos 8 caracteres, una letra mayúscula, una letra minúscula, un número y un carácter especial');
-    }
-}
+export const userSchema = z.object({
+    username: z.string()
+        .nonempty('El nombre de usuario es obligatorio')
+        .min(3, 'El nombre de usuario debe tener al menos 3 caracteres')
+        .max(30, 'El nombre de usuario no debe exceder los 30 caracteres')
+        .refine(val => !val.includes(' '), 'El nombre de usuario no debe contener espacios'),
+    
+    fullname: z.string()
+        .nonempty('El nombre completo es obligatorio')
+        .min(3, 'El nombre completo debe tener al menos 3 caracteres')
+        .max(100, 'El nombre completo no debe exceder los 100 caracteres')
+        .refine(val => !val.includes('  '), 'El nombre completo no debe contener espacios dobles')
+        .refine(val => /^[A-Za-zÁÉÍÓÚáéíóúÑñÜü\s]+$/.test(val), 'El nombre completo solo debe contener letras y espacios')
+        .refine(val => val.trim().split(' ').length >= 2, 'El nombre completo debe contener al menos un nombre y un apellido'),
+    
+    password: z.string()
+        .nonempty('La contraseña es obligatoria')
+        .min(8, 'La contraseña debe tener al menos 8 caracteres')
+        .max(100, 'La contraseña no debe exceder los 100 caracteres')
+        .refine(val => !val.includes(' '), 'La contraseña no debe contener espacios')
+        .refine(val => /^(?=.*[a-z])(?=.*[A-Z])(?=.*\d)(?=.*[@$!%*?&.,-_])[A-Za-z\d@$!%*?&.,-_]{8,}$/.test(val), 
+        'La contraseña debe tener al menos 8 caracteres, una letra mayúscula, una letra minúscula, un número y un carácter especial'),    
+    role_id: z.number()
+        .int('El ID del rol debe ser un número entero')
+        .positive('El ID del rol debe ser un número positivo'),
+});

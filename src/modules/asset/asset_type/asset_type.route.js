@@ -1,6 +1,7 @@
 import { Router } from 'express';
 import { auth } from "#src/shared/middlewares/auth.middleware.js";
 import { authorizeRole } from '#src/shared/middlewares/authorize.middleware.js';
+import { validate } from '#src/shared/middlewares/validate.middleware.js';
 import {
     getAllAssetTypesController,
     getAssetTypeByIdController,
@@ -8,6 +9,7 @@ import {
     updateAssetTypeController,
     deleteAssetTypeController
 } from './asset_type.controller.js';
+import { assetTypeSchema } from './asset_type.schema.js';
 import { ROLE_NAMES } from '#src/shared/constants/ROLE_NAMES.js';
 
 const router = Router();
@@ -18,12 +20,14 @@ router.post(
     "/create", 
     auth, 
     authorizeRole(ROLE_NAMES.ADMIN),
+    validate(assetTypeSchema),
     createAssetTypeController
 );
 router.patch(
     "/:id", 
     auth, 
     authorizeRole(ROLE_NAMES.ADMIN),
+    validate(assetTypeSchema),
     updateAssetTypeController
 );
 router.delete(

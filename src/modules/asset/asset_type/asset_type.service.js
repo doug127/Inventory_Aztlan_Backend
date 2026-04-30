@@ -5,12 +5,14 @@ import {
     updateAssetTypeRepository,
     deleteAssetTypeRepository
 } from "./asset_type.repository.js";
-import { assetTypesDTO } from "./asset_type.schema.js";
+import { assetTypeDTO } from "./asset_type.dto.js";
 
 export const getAllAssetTypesService = async () => {
     const types = await getAllAssetTypesRepository();
 
-    return types;
+    const payload = types.map(assetTypeDTO);
+
+    return payload;
 };
 
 export const getAssetTypeByIdService = async (id) => {
@@ -26,17 +28,18 @@ export const getAssetTypeByIdService = async (id) => {
         throw new Error("Tipo de asset no encontrado");
     }
 
-    return assetType;
+    const payload = assetTypeDTO(assetType);
+
+    return payload;
 };
 
 export const createAssetTypeService = async (data) => {
-    const assetTypeDTO = new assetTypesDTO(data);
-
-    const dto = assetTypeDTO.validate();
-
-    const assetType = await createAssetTypeRepository(dto);
-        
-    return assetType;
+    
+    const assetType = await createAssetTypeRepository(data);
+    
+    const payload = assetTypeDTO(assetType);
+    
+    return payload;
 };
 
 export const updateAssetTypeService = async (id, data) => {
@@ -50,12 +53,11 @@ export const updateAssetTypeService = async (id, data) => {
         throw new Error("Tipo de asset no encontrado");
     }
 
-    const assetTypeDTO = new assetTypesDTO(data);
-    const dto = assetTypeDTO.validate();
+    const updatedAssetType = await updateAssetTypeRepository(assetType, data);
 
-    const updatedAssetType = await updateAssetTypeRepository(assetType, dto);
+    const payload = assetTypeDTO(updatedAssetType);
 
-    return updatedAssetType;
+    return payload;
 };
 
 export const deleteAssetTypeService = async (id) => {

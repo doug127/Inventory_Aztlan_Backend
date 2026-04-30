@@ -21,9 +21,10 @@ export const findUserWithRoleByIdRepository = async (id) => {
 
 export const findAllUsersRepository = async (currentLevel) => {
     return await User.findAll({ 
-      attributes: { exclude: ['password'] },
+      attributes: { exclude: ['password', 'createdAt', 'updatedAt'] },
       include: {
         model: Role,
+        attributes: ['id', 'name', 'hierarchy_level'],
         required: true,
         where: {
             hierarchy_level: {
