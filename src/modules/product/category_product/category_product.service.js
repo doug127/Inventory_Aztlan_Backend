@@ -7,18 +7,20 @@ import {
     getCategoryProductByIdRepository,
     deleteCategoryProductRepository,
     hasCategoryChildrenRepository,
-    // hasProductsInCategoryRepository
+    hasProductsInCategoryRepository
 } from "./category_product.repository.js";
 import {
-    validateCategoryProductData
-} from './category_product.schema.js';
+    categoryProductDTO
+} from './category_product.dto.js';
 
 export const getAllCategoryProducts = async () => {
     const all = await getAllCategoryProductsRepository();
-    if (!all || all.length === 0) {
-        return [];
-    }
-    return all;
+
+    const mapped = all.map(category => categoryProductDTO(category));
+
+    const payload = mapped.filter(category => category !== null);
+    
+    return payload;
 };  
 
 export const getCategoryAncestors = async (id) => {
@@ -43,7 +45,7 @@ export const getCategoryAncestors = async (id) => {
         ancestors.push({
             id: category.id,
             name: category.name,
-            parent_id: category.parent_id
+            parent: category.parent ? category.parent.name : null
         });
         currentId = category.parent_id;
     }
@@ -83,7 +85,7 @@ export const getCategoryDescendants = async (id) => {
                 descendants.push({
                     id: child.id,
                     name: child.name,
-                    parent_id: child.parent_id
+                    parent: child.parent ? child.parent.name : null
                 });
                 queue.push(child.id);
             }
@@ -98,8 +100,12 @@ export const getCategoryProductByName = async (name) => {
         throw new Error('Nombre de categoria de producto no proporcionado');
     }
     const category = await getCategoryProductByNameRepository(name.trim().toLowerCase());
+    
     if (!category) throw new Error('Categoria de producto no encontrada');
-    return category;
+
+    const payload = category ? categoryProductDTO(category) : null;
+    
+    return payload;
 };
 
 
@@ -110,7 +116,12 @@ export const createCategoryProduct = async (data) => {
     description = description ? description.trim() : null;
     
     const existingCategory = await getCategoryProductByNameRepository(name);
-    validateCategoryProductData({ name, description, existingCategory });
+    if (existingCategory) {
+        throw new Error('Ya existe una categoria de producto con ese nombre');
+    }
+    
+    const { name: validatedName, description: validatedDescription } = categoryProductSchema
+        .parse({ name, description });
 
     if(parent_id !== undefined && parent_id !== null) {
         const parent = await getCategoryProductByIdRepository(parent_id);
@@ -121,7 +132,9 @@ export const createCategoryProduct = async (data) => {
 
     const created = await createCategoryProductRepository({name, description, parent_id: parent_id || null});
 
-    return created;
+    const payload = categoryProductDTO(created);
+
+    return payload;
 };
 
 export const updateCategoryProduct = async (id, data) => {
@@ -167,7 +180,9 @@ export const updateCategoryProduct = async (id, data) => {
         parent_id: parent_id ?? existing.parent_id 
     });
 
-    return updated;
+    const payload = categoryProductDTO(updated);
+
+    return payload;
 }
 
 export const deleteCategoryProduct = async (id) => {
@@ -179,11 +194,10 @@ export const deleteCategoryProduct = async (id) => {
         throw new Error('No se puede eliminar la categoria de producto porque tiene subcategorias asociadas');
     }
 
-    // * Habilitar cuando se implemente el modelo de Producto
-    // const hasProducts = await hasProductsInCategoryRepository(id);
-    // if (hasProducts) {
-    //     throw new Error('No se puede eliminar la categoria de producto porque tiene productos asociados');
-    // }
+    const hasProducts = await hasProductsInCategoryRepository(id);
+    if (hasProducts) {
+        throw new Error('No se puede eliminar la categoria de producto porque tiene productos asociados');
+    }
 
     await deleteCategoryProductRepository(id);
     return;

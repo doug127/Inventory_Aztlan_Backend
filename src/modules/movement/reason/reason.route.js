@@ -1,6 +1,7 @@
 import express from "express";
 import { auth } from '#src/shared/middlewares/auth.middleware.js';
 import { authorizeRole } from '#src/shared/middlewares/authorize.middleware.js';
+import { validate } from "#src/shared/middlewares/validate.middleware.js";
 import {
     createReasonController,
     getAllReasonsController,
@@ -8,6 +9,7 @@ import {
     updateReasonController,
     deleteReasonController
 } from "./reason.controller.js";
+import { reasonSchema } from "./reason.schema.js";
 import { ROLE_NAMES } from "#src/shared/constants/ROLE_NAMES.js";
 
 const router = express.Router();
@@ -18,12 +20,14 @@ router.post(
     "/create", 
     auth, 
     authorizeRole(ROLE_NAMES.SUPERADMIN), 
+    validate(reasonSchema),
     createReasonController
 );
 router.patch(
     "/update/:id", 
     auth,
     authorizeRole(ROLE_NAMES.SUPERADMIN), 
+    validate(reasonSchema),
     updateReasonController
 );
 router.delete(

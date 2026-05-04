@@ -22,6 +22,8 @@ User.belongsTo(Role, { foreignKey: 'role_id' });
 CategoryProduct.hasMany(Product, { foreignKey: 'product_category_id' });
 Product.belongsTo(CategoryProduct, { foreignKey: 'product_category_id' });
 
+CategoryProduct.belongsTo(CategoryProduct, { foreignKey: 'parent_id', as: 'parent' });
+
 // * Relación uno a muchos entre Unit y Product
 Unit.hasMany(Product, { foreignKey: 'unit_id' });
 Product.belongsTo(Unit, { foreignKey: 'unit_id' });

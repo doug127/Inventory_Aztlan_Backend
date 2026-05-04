@@ -1,31 +1,7 @@
-export class MovementTypesDTO {
-    constructor({
-        type
-    }){
-        this.type = type
-    }
+import { z } from "zod";
 
-    validate() {
-        if (!this.type) {
-            throw new Error("El campo 'type' es obligatorio");
-        }
-
-        if (typeof this.type !== "string") {
-            throw new Error("El campo 'type' debe ser un texto");
-        }
-
-        const type = this.type.trim();
-
-        if (type.length === 0) {
-            throw new Error("El campo 'type' no puede estar vacío");
-        }
-
-        if (type.length > 50) {
-            throw new Error("El campo 'type' no puede superar 50 caracteres");
-        }
-
-        return {
-            type: type.toUpperCase()
-        };
-    }
-}
+export const MovementTypeSchema = z.object({
+    type: z.string()
+        .min(1, "El campo tipo no puede estar vacío")
+        .max(50, "El campo tipo no puede superar 50 caracteres")
+});

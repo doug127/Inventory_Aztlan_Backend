@@ -1,4 +1,4 @@
-import { CategoryProduct } from "#src/database/models/index.model.js";
+import { CategoryProduct, Product } from "#src/database/models/index.model.js";
 import { Op } from "sequelize";
 
 export const getAllCategoryProductsRepository = async () => {
@@ -11,7 +11,12 @@ export const getAllCategoryProductsRepository = async () => {
 export const getAllDescendantsRepository = async (id) => {
   return await CategoryProduct.findAll({
     where: { parent_id: id },
-    attributes: ['id', 'name', 'parent_id']
+    attributes: ['id', 'name', 'parent_id'],
+    include: {
+      model: CategoryProduct,
+      as: 'parent',
+      attributes: ['id', 'name']
+    }
   });
 };
 
@@ -51,8 +56,7 @@ export const hasCategoryChildrenRepository = async (id) => {
   return count > 0;
 };
 
-// * Habilitar cuando se implemente el modelo de Producto
-// export const hasProductsInCategoryRepository = async (id) => {
-//   const count = await Product.count({ where: { product_category_id: id } });
-//   return count > 0;
-// };
+export const hasProductsInCategoryRepository = async (id) => {
+  const count = await Product.count({ where: { product_category_id: id } });
+  return count > 0;
+};

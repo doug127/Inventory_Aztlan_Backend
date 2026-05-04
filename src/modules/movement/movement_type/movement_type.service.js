@@ -5,14 +5,13 @@ import {
   updateMovementTypeRepository,
   deleteMovementTypeRepository
 } from "./movement_type.repository.js";
-import { MovementTypesDTO } from "./movement_type.schema.js";
+import { movementTypeDTO } from "./movement_type.dto.js";
 
 export const getAllMovementTypesService = async () => {
     const types = await getAllMovementTypesRepository();
     
-    return {
-        data: types
-    };
+    const payload = types.map(movementTypeDTO);
+    return payload;
 };
 
 export const getMovementTypeByIdService = async (id) => {
@@ -28,25 +27,30 @@ export const getMovementTypeByIdService = async (id) => {
         throw new Error("Tipo de movimiento no encontrado");
     }
     
-    return {
-        data: movementType
-    };
+    const payload = movementTypeDTO(movementType);
+    
+    return payload;
 };
 
 export const createMovementTypeService = async (data) => {
-  const movementTypeDTO = new MovementTypesDTO(data);
 
-  const dto = movementTypeDTO.validate();
+  const { type } = data;
 
-  const movementType = await createMovementTypeRepository(dto);
+  const typeFormatted = type.trim().toUpperCase(); 
 
-  return {
-    data: movementType
-  };
+  const movementType = await createMovementTypeRepository({ ...data, type: typeFormatted });
+
+  const payload = movementTypeDTO(movementType);
+
+  return payload;
 };
 
 export const updateMovementTypeService = async (id, data) => {
+  
+  const { type } = data;
 
+  const typeFormatted = type.trim().toUpperCase();
+  
   const movementTypeId = Number(id);
 
   if (isNaN(movementTypeId)) {
@@ -59,15 +63,11 @@ export const updateMovementTypeService = async (id, data) => {
     throw new Error("Tipo de movimiento no encontrado");
   }
 
-  const movementTypeDTO = new MovementTypesDTO(data);
+  const updatedMovementType = await updateMovementTypeRepository(movementType, { ...data, type: typeFormatted });
 
-  const dto = movementTypeDTO.validate();
+  const payload = movementTypeDTO(updatedMovementType);
 
-  const updatedMovementType = await updateMovementTypeRepository(movementType, dto);
-
-  return {
-    data: updatedMovementType
-  };
+  return payload;
 };
 
 export const deleteMovementTypeService = async (id) => {

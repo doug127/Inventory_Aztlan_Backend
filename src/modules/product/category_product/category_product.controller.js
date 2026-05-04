@@ -46,7 +46,7 @@ export const getCategoryProductByNameController = async (req, res) => {
 
 export const createCategoryProductController = async (req, res) => {
     try {
-        const newCategory = await createCategoryProduct(req.body);
+        const newCategory = await createCategoryProduct(req.validatedData);
         res.status(201).json(newCategory);
     } catch (error) {
         res.status(500).json({ error: error.message });
@@ -55,7 +55,7 @@ export const createCategoryProductController = async (req, res) => {
 
 export const updateCategoryProductController = async (req, res) => {
     try {
-        const updatedCategory = await updateCategoryProduct(req.params.id, req.body);
+        const updatedCategory = await updateCategoryProduct(req.params.id, req.validatedData);
         res.status(200).json(updatedCategory);
     } catch (error) {
         res.status(500).json({ error: error.message });

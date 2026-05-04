@@ -8,7 +8,7 @@ import {
 
 export const createMovementTypeController = async (req, res) => {
   try {
-    const result = await createMovementTypeService(req.body);
+    const result = await createMovementTypeService(req.validatedData);
     res.status(201).json(result);
   } catch (error) {
     res.status(400).json({ error: error.message });
@@ -35,7 +35,7 @@ export const getMovementTypeByIdController = async (req, res) => {
 
 export const updateMovementTypeController = async (req, res) => {
   try {
-    const result = await updateMovementTypeService(req.params.id, req.body);
+    const result = await updateMovementTypeService(req.params.id, req.validatedData);
     res.status(200).json(result);
   } catch (error) {
     res.status(400).json({ error: error.message });

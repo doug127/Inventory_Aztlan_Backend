@@ -5,15 +5,15 @@ import {
     updateReasonRepository,
     deleteReasonRepository
 } from "./reason.repository.js";
-import { ReasonsDTO } from "./reason.schema.js";
+import { reasonDTO } from "./reason.dto.js";
 
 export const getAllReasonsService = async () => {
 
     const reasons = await getAllReasonsRepository();
 
-    return {
-        data: reasons
-    };
+    const payload = reasons.map(reasonDTO);
+
+    return payload;
 };
 
 export const getReasonByIdService = async (id) => {
@@ -30,25 +30,29 @@ export const getReasonByIdService = async (id) => {
         throw new Error("Razón no encontrada");
     }
 
-    return {
-        data: reason
-    };
+    const payload = reasonDTO(reason);
+
+    return payload;
 };
 
 export const createReasonService = async (data) => {
 
-    const reasonDTO = new ReasonsDTO(data);
+    const { type } = data;
 
-    const dto = reasonDTO.validate();
+    const typeFormatted = type.trim().toUpperCase();
 
-    const reason = await createReasonRepository(dto);
+    const reason = await createReasonRepository({ type: typeFormatted });
 
-    return {
-        data: reason
-    };
+    const payload = reasonDTO(reason);
+    
+    return payload;
 };
 
 export const updateReasonService = async (id, data) => {
+
+    const { type } = data;
+
+    const typeFormatted = type.trim().toUpperCase();
 
     const reasonId = Number(id);
 
@@ -62,15 +66,11 @@ export const updateReasonService = async (id, data) => {
         throw new Error("Razón no encontrada");
     }
 
-    const reasonDTO = new ReasonsDTO(data);
+    const updatedReason = await updateReasonRepository(reason, { type: typeFormatted });
 
-    const dto = reasonDTO.validate();
+    const payload = reasonDTO(updatedReason);
 
-    const updatedReason = await updateReasonRepository(reason, dto);
-
-    return {
-        data: updatedReason
-    };
+    return payload;
 };
 
 export const deleteReasonService = async (id) => {
