@@ -5,10 +5,14 @@ import {
     updateUnitRepository,
     deleteUnitRepository
 } from './unit.repository.js';
-import { UnitDTO } from './unit.schema.js';
+import { unitDTO } from './unit.dto.js';
 
 export const getAllUnitsService = async () => {
-    return await getAllUnitsRepository();
+    const units = await getAllUnitsRepository();
+
+    const payload = units.map(unit => unitDTO(unit));
+
+    return payload;
 }
 
 export const getUnitByIdService = async (id) => {
@@ -16,15 +20,14 @@ export const getUnitByIdService = async (id) => {
     if (!unit) {
         throw new Error('Unidad no encontrada');
     }
-    return unit;
+    const payload = unitDTO(unit);
+
+    return payload;
 }
 
 export const createUnitService = async (data) => {
     let {base_unit_id = null} = data;
     
-    const unitDTO = new UnitDTO(data);
-    unitDTO.validate();
-
     if(base_unit_id !== null) {
         const baseUnit = await getUnitByIdRepository(base_unit_id);
         
@@ -35,7 +38,11 @@ export const createUnitService = async (data) => {
         }
     }
     
-    return await createUnitRepository({...data, base_unit_id});
+    const newUnit = await createUnitRepository({...data, base_unit_id});
+
+    const payload = unitDTO(newUnit);
+
+    return payload;
 }
 
 export const updateUnitService = async (id, data) => {
@@ -46,9 +53,6 @@ export const updateUnitService = async (id, data) => {
         throw new Error('Unidad no encontrada para actualizar');
     }
     
-    const unitDTO = new UnitDTO(data);
-    unitDTO.validate();
-
     if(base_unit_id !== null) {
         const baseUnit = await getUnitByIdService(base_unit_id);
         if (!baseUnit) throw new Error('La unidad base no existe');
@@ -60,7 +64,11 @@ export const updateUnitService = async (id, data) => {
         }
     }
 
-    return await updateUnitRepository(id, {...data, base_unit_id});
+    const updatedUnit = await updateUnitRepository(id, {...data, base_unit_id});
+
+    const payload = unitDTO(updatedUnit);
+
+    return payload;
 }
 
 export const deleteUnitService = async (id) => {

@@ -53,9 +53,43 @@ export const getProductByIdRepository = async (id) => {
     });
 };
 
+export const getProductByNameRepository = async (name) => {
+    return await Product.findOne({
+        where: { name },
+        attributes: ['name', 'code', 'content_quantity', 'min_stock', 'max_stock'],
+        include: [
+            {
+                model: Unit,
+                attributes: ['name', 'code']
+            },
+            {
+                model: CategoryProduct,
+                attributes: ['name']
+            }
+        ]
+    });
+};
+
 export const getProductByCodeRepository = async (code) => {
     return await Product.findOne({
         where: { code },
+        attributes: ['name', 'code', 'content_quantity', 'min_stock', 'max_stock'],
+        include: [
+            {
+                model: Unit,
+                attributes: ['name', 'code']
+            },
+            {
+                model: CategoryProduct,
+                attributes: ['name']
+            }
+        ]
+    });
+};
+
+export const getProductByUnitIdRepository = async (unit_id) => {
+    return await Product.findOne({
+        where: { unit_id },
         attributes: ['name', 'code', 'content_quantity', 'min_stock', 'max_stock'],
         include: [
             {

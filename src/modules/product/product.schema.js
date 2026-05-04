@@ -1,3 +1,18 @@
+import { z } from 'zod';
+
+export const ProductSchema = z.object({
+    name: z.string().min(3).max(50),
+    code: z.string().min(3).max(20)
+        .refine((val) => !val.includes(' '), {
+            message: 'El código del producto no puede contener espacios'
+        }),
+    content_quantity: z.number().positive(),
+    min_stock: z.number().nonnegative(),
+    max_stock: z.number().nonnegative(),
+    unit_id: z.number().positive(),
+    product_category_id: z.number().positive()
+});
+
 export class ProductDTO {
     constructor({ name, code, content_quantity, min_stock, max_stock, unit_id, product_category_id }) {
         this.name = name;

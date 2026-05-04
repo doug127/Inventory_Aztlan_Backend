@@ -2,11 +2,14 @@ import {
   getAllProductsRepository,
   getProductByIdRepository,
   getAllByFilterProductsRepository,
+  getProductByNameRepository,
+  getProductByCodeRepository,
+  getProductByUnitIdRepository,
   createProductRepository,
   updateProductRepository,
   deleteProductRepository
 } from './product.repository.js';
-import { ProductDTO } from './product.schema.js';
+import { productDTO } from './product.dto.js';
 import { 
     parseNumericRangeFromQuery,
     applyNumericFiltersToWhere,
@@ -15,15 +18,23 @@ import {
 } from '#src/shared/utils/query.js';
 
 export const getAllProductsService = async () => {
-    return await getAllProductsRepository();
+    const products = await getAllProductsRepository();
+
+    const payload = products.map(productDTO);
+    
+    return payload;
 }
 
 export const getProductByIdService = async (id) => {
     const product = await getProductByIdRepository(id);
+    
     if (!product) {
         throw new Error('Producto no encontrado');
     }
-    return product;
+
+    const payload = productDTO(product);
+
+    return payload;
 }
 
 export const getAllByFilterProductsService = async (query) => {
@@ -71,8 +82,10 @@ export const getAllByFilterProductsService = async (query) => {
 
     const { rows, count } = await getAllByFilterProductsRepository({ where, limit, offset, order });
     
+    const payload = rows.map(productDTO);
+
     return {
-        data: rows,
+        data: payload,
         meta: {
             total: count,
             page,
@@ -85,20 +98,66 @@ export const getAllByFilterProductsService = async (query) => {
 }
 
 export const createProductService = async (data) => {
-    console.log('Datos recibidos para crear producto:', data);
+    const { name, code, unit_id, min_stock, max_stock } = data;
+    console.log('Data recibida en el servicio:', data);
+    
+    if (min_stock >= max_stock) {
+        throw new Error('El stock mínimo no puede ser mayor o igual al stock máximo');
+    }
 
-    const productDTO = new ProductDTO(data);
-    productDTO.validate();
+    const existingProductByName = await getProductByNameRepository(name);
+    if (existingProductByName) {
+        throw new Error('Ya existe un producto con el mismo nombre');
+    }
 
-    return await createProductRepository(data);
+    const existingProductByCode = await getProductByCodeRepository(code);
+    if (existingProductByCode) {
+        throw new Error('Ya existe un producto con el mismo código');
+    }
+
+    const existingUnit = await getProductByUnitIdRepository(unit_id);
+    if (!existingUnit) {
+        throw new Error('La unidad especificada no existe');
+    }
+
+    const newProduct = await createProductRepository(data);
+    console.log('Producto creado:', newProduct);
+    const payload = productDTO(newProduct);
+
+    return payload;
 }
 
 export const updateProductService = async (id, data) => {
+    const { name, code, unit_id, min_stock, max_stock } = data;
+    
     const existingProduct = await getProductByIdRepository(id);
     if (!existingProduct) {
         throw new Error('Producto no encontrado');
     }
-    return await updateProductRepository(id, data);
+
+    const existingProductByName = await getProductByNameRepository(name);
+    if (existingProductByName && existingProductByName.id !== id) {
+        throw new Error('Ya existe un producto con el mismo nombre');
+    }
+
+    if (min_stock >= max_stock) {
+        throw new Error('El stock mínimo no puede ser mayor o igual al stock máximo');
+    }
+    const existingProductWithCode = await getProductByCodeRepository(code);
+    if (existingProductWithCode && existingProductWithCode.id !== id) {
+        throw new Error('Ya existe un producto con el mismo código');
+    }
+
+    const existingUnit = await getProductByUnitIdRepository(unit_id);
+    if (!existingUnit) {
+        throw new Error('La unidad especificada no existe');
+    }
+
+    const updatedProduct = await updateProductRepository(id, data);
+
+    const payload = productDTO(updatedProduct);
+    
+    return payload;
 }
 
 export const deleteProductService = async (id) => {

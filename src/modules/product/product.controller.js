@@ -37,7 +37,7 @@ export const getAllByFilterProductsController = async (req, res) => {
 
 export const createProductController = async (req, res) => {
     try {
-        const createdProduct = await createProductService(req.body);
+        const createdProduct = await createProductService(req.validatedData);
         res.status(201).json(createdProduct);
     } catch (error) {
         res.status(400).json({ message: error.message });
@@ -47,7 +47,7 @@ export const createProductController = async (req, res) => {
 export const updateProductController = async (req, res) => {
     try {
         const { id } = req.params;
-        const updatedProduct = await updateProductService(id, req.body);
+        const updatedProduct = await updateProductService(id, req.validatedData);
         res.status(200).json(updatedProduct);
     } catch (error) {
         res.status(400).json({ message: error.message });

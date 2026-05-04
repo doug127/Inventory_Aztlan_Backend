@@ -27,7 +27,7 @@ export const getUnitByIdController = async (req, res) => {
 
 export const createUnitController = async (req, res) => {
     try {
-        const data = req.body;  
+        const data = req.validatedData;  
         const newUnit = await createUnitService(data);
         res.status(201).json(newUnit);
     } catch (error) {
@@ -38,7 +38,7 @@ export const createUnitController = async (req, res) => {
 export const updateUnitController = async (req, res) => {
     try {
         const { id } = req.params;
-        const data = req.body;  
+        const data = req.validatedData;  
         const updatedUnit = await updateUnitService(id, data);
         res.status(200).json(updatedUnit);
     } catch (error) {
