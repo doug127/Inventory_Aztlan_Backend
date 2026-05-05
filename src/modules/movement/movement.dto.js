@@ -33,3 +33,36 @@ export const movementDTO = (movement) => {
         })) ?? []
     };
 };
+
+export const movementGetDTO = (movement) => {
+    const m = movement.get ? movement.get() : movement;
+
+    return {
+        id: m.id,
+        reference: m.reference,
+        datetime: m.datetime,
+        note: m.note,
+
+        movement_type: m.movement_type,
+        reason: m.reason,
+        user: m.user,
+
+        warehouse_from: m.warehouse_from,
+        warehouse_to: m.warehouse_to,
+
+        movement_lines: m.movement_lines?.map(line => ({
+            id: line.id,
+            quantity: line.quantity,
+            product: line.product
+        })) ?? [],
+
+        movement_targets: m.movement_targets?.map(target => ({
+            id: target.id,
+            asset: target.asset ? {
+                id: target.asset.id,
+                name: target.asset.name,
+                asset_type: target.asset.asset_type
+            } : null
+        })) ?? []
+    };
+};

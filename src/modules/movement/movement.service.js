@@ -16,7 +16,7 @@ import {
     updateStockRepository
 } from '../stock/stock.repository.js';
 import { bulkCreateMovementTargetsRepository } from './movement_target/movement_target.repository.js';
-import { movementDTO } from "./movement.dto.js";
+import { movementDTO, movementGetDTO } from "./movement.dto.js";
 import { sequelize } from "#src/config/database.js";
 
 export const getFilteredMovementsServices = async (query) => {
@@ -55,7 +55,7 @@ export const getFilteredMovementsServices = async (query) => {
 
     const totalPages = Math.ceil(count / limit);
 
-    const payload = rows.map(movementDTO);
+    const payload = rows.map(movementGetDTO);
 
     return {
         data: payload,
@@ -82,7 +82,7 @@ export const getMovementByIdService = async (id) => {
         throw new Error("Movimiento no encontrado");
     }
 
-    const payload = movementDTO(movement);
+    const payload = movementGetDTO(movement);
 
     return payload;
 };

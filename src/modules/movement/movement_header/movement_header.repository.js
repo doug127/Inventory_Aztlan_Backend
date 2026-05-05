@@ -66,46 +66,55 @@ const getMovementsHeadersRepository = async ({ where, limit, offset, order }) =>
 }
 
 export const getAllMovementsRepository = async ({ where, limit, offset, order, product_id }) => {
+
     const movementLineInclude = {
         model: MovementLine,
+        as: 'movement_lines',
         attributes: ['id', 'quantity', 'note'],
         include: [
             {
                 model: Product,
+                as: 'product',
                 attributes: ['id', 'name']
             }
         ]
     };
 
+    // 🔥 filtro por producto (se mantiene igual)
     if (product_id) {
         movementLineInclude.where = { product_id };
         movementLineInclude.required = true;
     }
-    
+
     const options = {
         where,
         attributes: ['id', 'reference', 'datetime', 'note'],
         include: [
             {
                 model: MovementType,
+                as: 'movement_type',
                 attributes: ['id', 'type']
             },
             {
                 model: Reason,
+                as: 'reason',
                 attributes: ['id', 'type']
             },
             movementLineInclude,
             {
                 model: MovementTarget,
+                as: 'movement_targets',
                 attributes: ['id'],
                 required: false,
                 include: [
                     {
                         model: Asset,
+                        as: 'asset',
                         attributes: ['id', 'name'],
                         include: [
                             {
                                 model: AssetType,
+                                as: 'asset_type',
                                 attributes: ['id', 'name']
                             }
                         ]
@@ -114,7 +123,7 @@ export const getAllMovementsRepository = async ({ where, limit, offset, order, p
             },
             {
                 model: Warehouse,
-                as:'warehouse_from',
+                as: 'warehouse_from',
                 attributes: ['id', 'code', 'name']
             },
             {
@@ -124,81 +133,84 @@ export const getAllMovementsRepository = async ({ where, limit, offset, order, p
             },
             {
                 model: User,
+                as: 'user',
                 attributes: ['id', 'username']
             }
         ],
         limit,
         offset,
-        order: [['id', order]], // o [['createdAt', order]] si prefieres por fecha
+        order: [['id', order]]
     };
-  
+
     const { count, rows } = await MovementHeader.findAndCountAll(options);
+
     return { count, rows };
-};
+}; 
 
 export const getMovementByIdRepository = async (id) => {
-    const movement = await MovementHeader.findByPk(id, {
-        attributes: [
-            'id',
-            'reference',
-            'datetime',
-            'note'
-        ],
+    return await MovementHeader.findByPk(id, {
+        attributes: ['id', 'reference', 'datetime', 'note'],
         include: [
             {
                 model: MovementType,
+                as: 'movement_type',
                 attributes: ['id', 'type']
             },
             {
                 model: Reason,
+                as: 'reason',
                 attributes: ['id', 'type']
             },
             {
+                model: User,
+                as: 'user',
+                attributes: ['id', 'username']
+            },
+            {
+                model: Warehouse,
+                as: 'warehouse_from',
+                attributes: ['id', 'code', 'name']
+            },
+            {
+                model: Warehouse,
+                as: 'warehouse_to',
+                attributes: ['id', 'code', 'name']
+            },
+            {
                 model: MovementLine,
-                attributes: ['id', 'quantity', 'note'],
+                as: 'movement_lines',
+                attributes: ['id', 'quantity'],
                 include: [
                     {
                         model: Product,
+                        as: 'product',
                         attributes: ['id', 'name']
                     }
                 ]
             },
             {
                 model: MovementTarget,
+                as: 'movement_targets',
+                required: false,
                 attributes: ['id'],
-                required: false, 
                 include: [
                     {
                         model: Asset,
+                        as: 'asset',
                         attributes: ['id', 'name'],
                         include: [
                             {
                                 model: AssetType,
+                                as: 'asset_type',
                                 attributes: ['id', 'name']
                             }
                         ]
                     }
                 ]
-            },
-            {
-                model: Warehouse,
-                as:'warehouse_from',
-                attributes: ['id', 'code', 'name']
-            },
-            {
-                model: Warehouse,
-                as: 'warehouse_to',
-                attributes: ['id', 'code', 'name']
-            },
-            {
-                model: User,
-                attributes: ['id', 'username']
             }
         ]
     });
-
-    return movement;
-}
+};
 
 export const getProductMovementsRepository = async ({
     product_id,
