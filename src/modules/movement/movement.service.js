@@ -1,4 +1,4 @@
-import { MovementDto } from "./movement.schema.js";
+import { calculateDeltas } from "./utils/calculateDeltas.js";
 import { 
     createMovementHeaderRepository,   
     getAllMovementsRepository,
@@ -16,6 +16,7 @@ import {
     updateStockRepository
 } from '../stock/stock.repository.js';
 import { bulkCreateMovementTargetsRepository } from './movement_target/movement_target.repository.js';
+import { movementDTO } from "./movement.dto.js";
 import { sequelize } from "#src/config/database.js";
 
 export const getFilteredMovementsServices = async (query) => {
@@ -54,8 +55,10 @@ export const getFilteredMovementsServices = async (query) => {
 
     const totalPages = Math.ceil(count / limit);
 
+    const payload = rows.map(movementDTO);
+
     return {
-        data: rows,
+        data: payload,
         meta: {
         total: count,
         page,
@@ -79,7 +82,9 @@ export const getMovementByIdService = async (id) => {
         throw new Error("Movimiento no encontrado");
     }
 
-    return movement;
+    const payload = movementDTO(movement);
+
+    return payload;
 };
 
 export const getProductMovementsService = async (product_id, query) => {
@@ -111,6 +116,8 @@ export const getProductMovementsService = async (product_id, query) => {
 
     const totalPages = Math.ceil(count / limit);
 
+    // const payload = rows.map(movementDTO);
+
     return {
         data: rows,
         meta: {
@@ -124,7 +131,7 @@ export const getProductMovementsService = async (product_id, query) => {
     };
 };
 
-export const createMovementService = async (payload, userId) => {
+export const createMovementService = async (data, userId) => {
 
     const { 
         movement_type_id,
@@ -135,24 +142,14 @@ export const createMovementService = async (payload, userId) => {
         warehouse_to_id,
         lines, 
         targets
-    } = payload;
+    } = data;
 
     return await sequelize.transaction(async (transaction) => {
 
         const datetime = new Date();
 
-        console.log("STEP 1: DTO");
-
-        const movementDto = new MovementDto({
-            reference,
-            datetime,
-            note,
-            created_by_user_id: userId
-        });
-
-        movementDto.validate();
-
         console.log("STEP 2: Validar FK");
+        console.log("Validando movement_type_id:", movement_type_id);
 
         const movementType = await getMovementTypeByIdRepository(movement_type_id);
 
@@ -222,86 +219,6 @@ export const createMovementService = async (payload, userId) => {
 
         console.log("STEP 6: Calcular deltas");
 
-        const calculateDeltas = ({
-            movement_type,
-            warehouse_from_id,
-            warehouse_to_id,
-            lines
-        }) => {
-
-            const deltas = [];
-
-            for (const line of lines) {
-
-                const { product_id, quantity } = line;
-
-                if (movement_type === 'ENTRADA') {
-
-                    if (!warehouse_to_id)
-                        throw new Error("Las entradas deben ir a un almacén");
-
-                    if (warehouse_from_id)
-                        throw new Error("Las entradas no deben venir de un almacén");
-
-                    deltas.push({
-                        product_id,
-                        warehouse_id: warehouse_to_id,
-                        delta: quantity
-                    });
-                }
-
-                if (movement_type === 'SALIDA') {
-
-                    if (!warehouse_from_id)
-                        throw new Error("Las salidas deben venir de un almacén");
-
-                    if (warehouse_to_id)
-                        throw new Error("Las salidas no pueden ir a un almacén");
-
-                    deltas.push({
-                        product_id,
-                        warehouse_id: warehouse_from_id,
-                        delta: -quantity
-                    });
-                }
-
-                if (movement_type === 'TRANSFERENCIA') {
-
-                    if (!warehouse_from_id)
-                        throw new Error("Las transferencias deben salir de un almacén");
-
-                    if (!warehouse_to_id)
-                        throw new Error("Las transferencias deben ir a un almacén");
-
-                    deltas.push({
-                        product_id,
-                        warehouse_id: warehouse_from_id,
-                        delta: -quantity
-                    });
-
-                    deltas.push({
-                        product_id,
-                        warehouse_id: warehouse_to_id,
-                        delta: quantity
-                    });
-                }
-
-                if (movement_type === 'AJUSTE') {
-
-                    if (!warehouse_from_id)
-                        throw new Error("Los ajustes deben hacerse sobre un almacén");
-
-                    deltas.push({
-                        product_id,
-                        warehouse_id: warehouse_from_id,
-                        delta: quantity
-                    });
-                }
-            }
-
-            return deltas;
-        };
-
         const deltas = calculateDeltas({
             movement_type,
             warehouse_from_id,
@@ -349,6 +266,8 @@ export const createMovementService = async (payload, userId) => {
             transaction
         );
 
-        return movement;
+        const payload = movementDTO(movement);
+    
+        return payload;
     });
 };

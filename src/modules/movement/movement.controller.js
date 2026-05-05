@@ -36,10 +36,11 @@ export const getProductMovementsController = async (req, res) => {
 
 export const createMovementController = async (req, res) => {
     try {
-        const payload = req.body;
+        const data = req.validatedData;
+        console.log("Data recibida en el controller:", data);
         const id = req.user.id;
 
-        const movement = await createMovementService(payload, id);
+        const movement = await createMovementService(data, id);
 
         res.status(201).json(movement);
     } catch (error) {

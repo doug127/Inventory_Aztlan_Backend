@@ -1,3 +1,25 @@
+import { z } from 'zod';
+
+export const MovementSchema = z.object({
+    movement_type_id: z.number(),
+    reason_id: z.number(),
+    warehouse_from_id: z.number().nullable(),
+    warehouse_to_id: z.number().nullable(),
+    reference: z.string().max(255),
+    datetime: z.string().refine((value) => !isNaN(Date.parse(value)), {
+        message: 'La fecha y hora del movimiento no es válida'
+    }),
+    note: z.string().max(500).nullable(),
+    created_by_user_id: z.number(),
+    lines: z.array(z.object({
+        product_id: z.number(),
+        quantity: z.number().positive()
+    })),
+    targets: z.array(z.object({
+        asset_id: z.number(),
+    })).nullable()
+});
+
 export class MovementDto {
     constructor({
         reference, 
