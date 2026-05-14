@@ -115,8 +115,14 @@ export const updateUserService = async ({ id, data, currentUser }) => {
   }
 };
 
-export const deleteUserService = async (id) => {
+export const deleteUserService = async (id, userId) => {
     try {
+        if (parseInt(id) === userId) {
+            throw new Error('No puedes eliminar tu propio usuario');
+        }
+        if (userId !== 'superadmin') {
+            throw new Error('No tienes permiso para eliminar usuarios');
+        }
         await deleteUserRepository(id);
         return;
     } catch (error) {

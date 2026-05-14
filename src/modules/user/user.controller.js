@@ -52,7 +52,9 @@ export const updateUserController = async (req, res) => {
 
 export const deleteUserController = async (req, res) => {
     try {
-        await deleteUserService(req.params.id);
+        const userId = req.user.id;
+        
+        await deleteUserService(req.params.id, userId);
         res.status(204).send();
     } catch (error) {
         res.status(500).json({ error: error.message });
