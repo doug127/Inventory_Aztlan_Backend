@@ -1,6 +1,7 @@
 import {
     getAllUnitsService,
     getUnitByIdService,
+    getBaseUnitsService,
     createUnitService,
     updateUnitService,
     deleteUnitService
@@ -20,6 +21,15 @@ export const getUnitByIdController = async (req, res) => {
         const { id } = req.params;
         const unit = await getUnitByIdService(id);
         res.status(200).json(unit);
+    } catch (error) {
+        res.status(404).json({ error: error.message });
+    }
+};
+
+export const getBaseUnitsController = async (req, res) => {
+    try {
+        const units = await getBaseUnitsService();
+        res.status(200).json(units);
     } catch (error) {
         res.status(404).json({ error: error.message });
     }

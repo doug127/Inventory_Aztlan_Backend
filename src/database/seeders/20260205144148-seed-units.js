@@ -13,7 +13,7 @@ export const up = async (queryInterface, Sequelize) => {
     },
     {
       name: 'Litro',
-      code: 'l',
+      code: 'L',
       base_unit_id: null,
       conversion_factor: 1,
       is_active: true,
@@ -22,7 +22,7 @@ export const up = async (queryInterface, Sequelize) => {
     },
     {
       name: 'Unidad',
-      code: 'ud',
+      code: 'und',
       base_unit_id: null,
       conversion_factor: 1,
       is_active: true,
@@ -45,7 +45,7 @@ export const up = async (queryInterface, Sequelize) => {
     {
       name: 'Gramo',
       code: 'g',
-      base_unit_id: baseMap.kg,
+      base_unit_id: baseMap.Kg,
       conversion_factor: 0.001,
       is_active: true,
       createdAt: now,
@@ -54,7 +54,7 @@ export const up = async (queryInterface, Sequelize) => {
     {
       name: 'Miligramo',
       code: 'mg',
-      base_unit_id: baseMap.kg,
+      base_unit_id: baseMap.Kg,
       conversion_factor: 0.000001,
       is_active: true,
       createdAt: now,
@@ -63,7 +63,7 @@ export const up = async (queryInterface, Sequelize) => {
     {
       name: 'Mililitro',
       code: 'ml',
-      base_unit_id: baseMap.l,
+      base_unit_id: baseMap.L,
       conversion_factor: 0.001,
       is_active: true,
       createdAt: now,
@@ -72,8 +72,53 @@ export const up = async (queryInterface, Sequelize) => {
     {
       name: 'Docena',
       code: 'dz',
-      base_unit_id: baseMap.ud,
+      base_unit_id: baseMap.und,
       conversion_factor: 12,
+      is_active: true,
+      createdAt: now,
+      updatedAt: now
+    },
+    {
+      name: 'Par',
+      code: 'pr',
+      base_unit_id: baseMap.und,
+      conversion_factor: 2,
+      is_active: true,  
+      createdAt: now,
+      updatedAt: now
+    },
+    {
+      name: 'Sacos',
+      code: 'sac',
+      base_unit_id: baseMap.Kg,
+      conversion_factor: 50,
+      is_active: true,
+      createdAt: now,
+      updatedAt: now  
+    },
+    {
+      name: 'Porrón',
+      code: 'prr',
+      base_unit_id: baseMap.L,
+      conversion_factor: 208,
+      is_active: true,
+      createdAt: now,
+      updatedAt: now
+    },
+    {
+      name: 'Sobre 200g',
+      code: 's200g',
+      base_unit_id: baseMap.Kg,
+      conversion_factor: 0.2,
+      is_active: true,
+      createdAt: now,
+      updatedAt: now  
+    }, 
+    {
+      name: "Sobre 100g",
+      code: "s100g",
+      base_unit_id: baseMap.Kg,
+      conversion_factor: 0.1,
       is_active: true,
       createdAt: now,
       updatedAt: now
