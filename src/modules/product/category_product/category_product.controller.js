@@ -1,12 +1,15 @@
 import {
     getAllCategoryProducts,
     getCategoryProductByName,
-    getCategoryAncestors,
-    getCategoryDescendants,
+    getRootCategoryProduct,
     createCategoryProduct,
     updateCategoryProduct,
     deleteCategoryProduct
 } from "./category_product.service.js";
+import {
+    getCategoryAncestors,
+    getCategoryDescendants,
+} from "./utils/utils.js";
 
 export const getAllCategoryProductsController = async (req, res) => {
     try {
@@ -41,6 +44,22 @@ export const getCategoryProductByNameController = async (req, res) => {
         }
     } catch (error) {
         res.status(500).json({ error: error.message });
+    }
+};
+
+export const getRootCategoriesController = async (req, res) => {
+    try {
+
+        const payload =
+            await getRootCategoryProduct();
+
+        return res.status(200).json(payload);
+
+    } catch (error) {
+
+        return res.status(500).json({
+            error: error.message
+        });
     }
 };
 

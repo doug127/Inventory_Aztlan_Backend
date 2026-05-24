@@ -3,7 +3,7 @@ import { Op } from "sequelize";
 
 export const getAllCategoryProductsRepository = async () => {
   return await CategoryProduct.findAll({
-    attributes: ['name', 'description', 'parent_id'],
+    attributes: ['id', 'name', 'description', 'parent_id'],
     order: [['name', 'ASC']]
   });
 };
@@ -25,6 +25,13 @@ export const getCategoryProductByNameRepository = async (name) => {
     where: {
       name: { [Op.iLike]: name } 
     }
+  });
+};
+
+export const getRootCategoryProductRepository = async (parent_id) => {
+  return await CategoryProduct.findAll({
+    where: { parent_id: parent_id },
+    attributes: ['id', 'name', 'description']
   });
 };
 

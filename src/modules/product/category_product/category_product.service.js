@@ -2,6 +2,7 @@ import {
     getAllCategoryProductsRepository,
     getAllDescendantsRepository,
     getCategoryProductByNameRepository,
+    getRootCategoryProductRepository,
     createCategoryProductRepository,
     updateCategoryProductRepository,
     getCategoryProductByIdRepository,
@@ -9,6 +10,7 @@ import {
     hasCategoryChildrenRepository,
     hasProductsInCategoryRepository
 } from "./category_product.repository.js";
+import { getCategoryAncestors, getCategoryDescendants, buildCategoryTree } from "./utils/utils.js";
 import {
     categoryProductDTO
 } from './category_product.dto.js';
@@ -16,98 +18,61 @@ import {
 export const getAllCategoryProducts = async () => {
     const all = await getAllCategoryProductsRepository();
 
-    const mapped = all.map(category => categoryProductDTO(category));
+    const payload = await Promise.all(
+        all.map(async (category) => {
 
-    const payload = mapped.filter(category => category !== null);
-    
-    return payload;
+            const ancestors = await getCategoryAncestors(category.id);
+            const descendants = await getCategoryDescendants(category.id);
+
+            return categoryProductDTO(
+                category,
+                ancestors,
+                descendants
+            );
+        })
+    );
+
+    return payload.filter(category => category !== null);
 };  
 
-export const getCategoryAncestors = async (id) => {
-    const ancestors = [];
-    const category = await getCategoryProductByIdRepository(id);
-    if (!category) {
-        throw new Error('Categoria de producto no encontrada');
-    }
-
-    let currentId = category.parent_id;
-
-    const seen = new Set();
-    while (currentId) {
-        if(seen.has(currentId)) {
-            throw new Error('Ciclo detectado en la jerarquía de categorías');
-        }
-        seen.add(currentId);
-
-        const category = await getCategoryProductByIdRepository(currentId);
-        if (!category) break;
-
-        ancestors.push({
-            id: category.id,
-            name: category.name,
-            parent: category.parent ? category.parent.name : null
-        });
-        currentId = category.parent_id;
-    }
-
-    return ancestors.reverse();
-};
-
-export const getCategoryDescendants = async (id) => {
-    const descendants = [];
-    const rootCategory = await getCategoryProductByIdRepository(id);
-    
-    if (!rootCategory) {
-        throw new Error('Categoría no encontrada');
-    }
-
-    // BFS (Breadth-First Search) para obtener todos los descendientes
-    const queue = [id];
-    const seen = new Set([id]); // Incluir el id inicial para evitar ciclos
-
-    while (queue.length > 0) {
-        const currentId = queue.shift();
-        
-        // Buscar todos los hijos directos del currentId
-        const children = await getAllDescendantsRepository(currentId);
-
-        for (const child of children) {
-            if(!child || !child.id) continue;
-
-            if (seen.has(child.id)) {
-                throw new Error('Ciclo detectado en la jerarquía de categorías');
-            }
-            
-            seen.add(child.id);
-            
-            // Solo agregar si NO es la categoría original
-            if (child.id !== id) {
-                descendants.push({
-                    id: child.id,
-                    name: child.name,
-                    parent: child.parent ? child.parent.name : null
-                });
-                queue.push(child.id);
-            }
-        }
-    }
-
-    return descendants;
-};
-
 export const getCategoryProductByName = async (name) => {
-    if(!name) {
-        throw new Error('Nombre de categoria de producto no proporcionado');
-    }
-    const category = await getCategoryProductByNameRepository(name.trim().toLowerCase());
-    
-    if (!category) throw new Error('Categoria de producto no encontrada');
 
-    const payload = category ? categoryProductDTO(category) : null;
-    
+    if (!name) {
+        throw new Error(
+            'Nombre de categoria de producto no proporcionado'
+        );
+    }
+
+    const category =
+        await getCategoryProductByNameRepository(
+            name.trim().toLowerCase()
+        );
+
+    if (!category) {
+        throw new Error(
+            'Categoria de producto no encontrada'
+        );
+    }
+
+    const ancestors =
+        await getCategoryAncestors(category.id);
+
+    const descendants =
+        await getCategoryDescendants(category.id);
+
+    const payload = categoryProductDTO(
+        category,
+        ancestors,
+        descendants
+    );
+
     return payload;
 };
 
+export const getRootCategoryProduct = async () => {
+
+    return await buildCategoryTree(null);
+};
 
 export const createCategoryProduct = async (data) => {
     let { name, description, parent_id } = data || null;
@@ -120,9 +85,6 @@ export const createCategoryProduct = async (data) => {
         throw new Error('Ya existe una categoria de producto con ese nombre');
     }
     
-    const { name: validatedName, description: validatedDescription } = categoryProductSchema
-        .parse({ name, description });
-
     if(parent_id !== undefined && parent_id !== null) {
         const parent = await getCategoryProductByIdRepository(parent_id);
         if (!parent) {

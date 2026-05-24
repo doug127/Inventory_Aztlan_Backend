@@ -6,5 +6,8 @@ export const categoryProductSchema = z.object({
         .max(100, "El campo 'name' no puede superar los 100 caracteres"),
     description: z.string()
         .max(255, "El campo 'description' no puede superar los 255 caracteres")
-        .optional()
+        .optional(),
+    parent_id: z.number()
+        .nullable()
+        .default(null),
 });

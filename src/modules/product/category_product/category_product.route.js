@@ -5,6 +5,7 @@ import { validate } from '#src/shared/middlewares/validate.middleware.js';
 import {
     getAllCategoryProductsController,
     getCategoryProductByNameController,
+    getRootCategoriesController,
     createCategoryProductController,
     updateCategoryProductController,
     deleteCategoryProductController
@@ -15,7 +16,8 @@ import { ROLE_NAMES } from '#src/shared/constants/ROLE_NAMES.js';
 const router = Router();
 
 router.get('/', auth, authorizeRole(ROLE_NAMES.USER), getAllCategoryProductsController);
-router.get('/:name', auth, authorizeRole(ROLE_NAMES.USER), getCategoryProductByNameController);
+router.get('/root', auth, authorizeRole(ROLE_NAMES.USER), getRootCategoriesController);
+router.get('/find/:name', auth, authorizeRole(ROLE_NAMES.USER), getCategoryProductByNameController);
 router.post( '/create', 
     auth, 
     authorizeRole(ROLE_NAMES.ADMIN), 
