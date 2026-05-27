@@ -41,47 +41,31 @@ export const getAllByFilterProductsService = async (query) => {
     
     const filters = {};
 
-    filters.min_stock = parseNumericRangeFromQuery(query, 'min_stock');
-    filters.max_stock = parseNumericRangeFromQuery(query, 'max_stock');
-    filters.content_quantity = parseNumericRangeFromQuery(query, 'content_quantity');
-
     if (query.name) filters.name = query.name.trim();
     if (query.code) filters.code = query.code.trim().toUpperCase();
+    if (query.category_product)  filters.category_product = query.category_product.trim();
+    if (query.unit) filters.unit = query.unit.trim();
 
-    if (query.category_product_id) filters.category_product_id = Number(query.category_product_id);
-    if (query.unit_id) filters.unit_id = Number(query.unit_id);
-
-    const minLower = getLowerBound(filters.min_stock);
-    const maxUpper = getUpperBound(filters.max_stock);
-
-    if (minLower !== null && maxUpper !== null && minLower >= maxUpper) {
-        throw new Error('El stock mínimo no puede ser mayor o igual al stock máximo');
-    }
-
-    const where = {};
-
-    if (filters.name) where.name = { [Op.iLike]: `%${filters.name}%` };
-    if (filters.code) where.code = { [Op.iLike]: `%${filters.code}%` };
-    if (filters.category_product_id) where.product_category_id = filters.category_product_id;
-    if (filters.unit_id) where.unit_id = filters.unit_id;
-    
-    // aplicar rangos numéricos
-    applyNumericFiltersToWhere(where, filters.content_quantity, 'content_quantity');
-    applyNumericFiltersToWhere(where, filters.min_stock, 'min_stock');
-    applyNumericFiltersToWhere(where, filters.max_stock, 'max_stock');
-
-    // Paginación
     const order = query.order === 'DESC' ? 'DESC' : 'ASC';
-    const page = Number(query.page) || 1; 
-    const limit = Number(query.limit) || 10; 
-    
-    if(page < 1) throw new Error('El número de página debe ser mayor o igual a 1');
-    if(limit < 1) throw new Error('El límite de resultados por página debe ser mayor o igual a 1');
+    const page = Number(query.page) || 1;
+    const limit = Number(query.limit) || 10;
+
+    if (page < 1) throw new Error( 'El número de página debe ser mayor o igual a 1' );
+
+    if (limit < 1) throw new Error( 'El límite debe ser mayor o igual a 1' );
 
     const offset = (page - 1) * limit;
 
-    const { rows, count } = await getAllByFilterProductsRepository({ where, limit, offset, order });
-    
+    // REPOSITORY
+
+    const { rows, count } =
+        await getAllByFilterProductsRepository({
+            filters,
+            limit,
+            offset,
+            order
+        });
+
     const payload = rows.map(productDTO);
 
     return {

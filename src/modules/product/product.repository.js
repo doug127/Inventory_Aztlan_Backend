@@ -1,53 +1,77 @@
 import { Product, Unit, CategoryProduct} from '#src/database/models/index.model.js';
+import { Op } from 'sequelize';
 
 export const getAllProductsRepository = async () => {
     return await Product.findAll({
-        attributes: ['name', 'code', 'content_quantity', 'min_stock', 'max_stock'],
+        attributes: ['id', 'name', 'code', 'content_quantity', 'min_stock', 'max_stock'],
         include: [
             {
                 model: Unit,
-                attributes: ['name', 'code']
+                attributes: ['id', 'name', 'code']
             },
             {   
                 model: CategoryProduct,
-                attributes: ['name']
+                attributes: ['id', 'name']
             } 
         ],
         order: [['name', 'ASC']]
     });
 };
 
-export const getAllByFilterProductsRepository = async ({where, limit, offset, order}) => {
-    return await Product.findAndCountAll({
+export const getAllByFilterProductsRepository = async ({
+    filters,
+    limit,
+    offset,
+    order
+}) => {
+
+    const where = {};
+
+    if (filters.name) where.name = { [Op.iLike]: `%${filters.name}%` };
+    if (filters.code) where.code = { [Op.iLike]: `%${filters.code}%` };
+    if (filters.content_quantity) where.content_quantity = filters.content_quantity; 
+    if (filters.min_stock) where.min_stock = filters.min_stock; 
+    if (filters.max_stock) where.max_stock = filters.max_stock;
+
+    const include = [
+        {
+            model: Unit,
+            as: 'unit',
+            required: !!filters.unit,
+            where: filters.unit
+                ? { name: { [Op.iLike]: `%${filters.unit}%`} }
+                : undefined
+        },
+        {
+            model: CategoryProduct,
+            as: 'category_product',
+            required: !!filters.category_product,
+            where: filters.category_product
+                ? { name: { [Op.iLike]: `%${filters.category_product}%` }}
+                : undefined
+        }
+    ];
+    return Product.findAndCountAll({
         where,
-        attributes: ['name', 'code', 'content_quantity', 'min_stock', 'max_stock', 'is_active'],
-        include: [
-            {
-                model: Unit,
-                attributes: ['name', 'code']
-            },
-            {
-                model: CategoryProduct,
-                attributes: ['name']
-            }
-        ],
+        include,
         limit,
         offset,
-        order: [['name', order]]
+        distinct: true,
+        order: [ ['name', order] ]
     });
-};    
+};
 
 export const getProductByIdRepository = async (id) => {
     return await Product.findByPk(id, {
-        attributes: ['name', 'code', 'content_quantity', 'min_stock', 'max_stock'],
+        attributes: ['id', 'name', 'code', 'content_quantity', 'min_stock', 'max_stock'],
         include: [
             {
                 model: Unit,
-                attributes: ['name', 'code']
+                attributes: ['id', 'name', 'code']
             },
             {
                 model: CategoryProduct,
-                attributes: ['name']
+                attributes: ['id', 'name']
             }
         ]
     });
@@ -56,15 +80,15 @@ export const getProductByIdRepository = async (id) => {
 export const getProductByNameRepository = async (name) => {
     return await Product.findOne({
         where: { name },
-        attributes: ['name', 'code', 'content_quantity', 'min_stock', 'max_stock'],
+        attributes: ['id', 'name', 'code', 'content_quantity', 'min_stock', 'max_stock'],
         include: [
             {
                 model: Unit,
-                attributes: ['name', 'code']
+                attributes: ['id', 'name', 'code']
             },
             {
                 model: CategoryProduct,
-                attributes: ['name']
+                attributes: ['id', 'name']
             }
         ]
     });
@@ -73,15 +97,15 @@ export const getProductByNameRepository = async (name) => {
 export const getProductByCodeRepository = async (code) => {
     return await Product.findOne({
         where: { code },
-        attributes: ['name', 'code', 'content_quantity', 'min_stock', 'max_stock'],
+        attributes: ['id', 'name', 'code', 'content_quantity', 'min_stock', 'max_stock'],
         include: [
             {
                 model: Unit,
-                attributes: ['name', 'code']
+                attributes: ['id', 'name', 'code']
             },
             {
                 model: CategoryProduct,
-                attributes: ['name']
+                attributes: ['id', 'name']
             }
         ]
     });
@@ -90,15 +114,15 @@ export const getProductByCodeRepository = async (code) => {
 export const getProductByUnitIdRepository = async (unit_id) => {
     return await Product.findOne({
         where: { unit_id },
-        attributes: ['name', 'code', 'content_quantity', 'min_stock', 'max_stock'],
+        attributes: ['id', 'name', 'code', 'content_quantity', 'min_stock', 'max_stock'],
         include: [
             {
                 model: Unit,
-                attributes: ['name', 'code']
+                attributes: ['id', 'name', 'code']
             },
             {
                 model: CategoryProduct,
-                attributes: ['name']
+                attributes: ['id', 'name']
             }
         ]
     });
@@ -108,15 +132,15 @@ export const createProductRepository = async (data) => {
     console.log('Creando producto con datos:', data);
     const created = await Product.create(data);
     return await Product.findByPk(created.id, {
-        attributes: ['name', 'code', 'content_quantity', 'min_stock', 'max_stock'],
+        attributes: ['id', 'name', 'code', 'content_quantity', 'min_stock', 'max_stock'],
         include: [
             {
                 model: Unit,
-                attributes: ['name', 'code']
+                attributes: ['id', 'name', 'code']
             },
             {   
                 model: CategoryProduct,
-                attributes: ['name']
+                attributes: ['id', 'name']
             } 
         ]
     });
@@ -127,15 +151,15 @@ export const updateProductRepository = async (id, updates) => {
     if (!product) return null;
     const updated = await product.update(updates);
     return await Product.findByPk(updated.id, {
-        attributes: ['name', 'code', 'content_quantity', 'min_stock', 'max_stock'],
+        attributes: ['id', 'name', 'code', 'content_quantity', 'min_stock', 'max_stock'],
         include: [
             {
                 model: Unit,
-                attributes: ['name', 'code']
+                attributes: ['id', 'name', 'code']
             },
             {   
                 model: CategoryProduct,
-                attributes: ['name']
+                attributes: ['id', 'name']
             } 
         ]
     });
