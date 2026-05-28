@@ -28,7 +28,6 @@ export const getAllByFilterProductsRepository = async ({
     const where = {};
 
     if (filters.name) where.name = { [Op.iLike]: `%${filters.name}%` };
-    if (filters.code) where.code = { [Op.iLike]: `%${filters.code}%` };
     if (filters.content_quantity) where.content_quantity = filters.content_quantity; 
     if (filters.min_stock) where.min_stock = filters.min_stock; 
     if (filters.max_stock) where.max_stock = filters.max_stock;

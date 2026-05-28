@@ -42,7 +42,6 @@ export const getAllByFilterProductsService = async (query) => {
     const filters = {};
 
     if (query.name) filters.name = query.name.trim();
-    if (query.code) filters.code = query.code.trim().toUpperCase();
     if (query.category_product)  filters.category_product = query.category_product.trim();
     if (query.unit) filters.unit = query.unit.trim();
 
