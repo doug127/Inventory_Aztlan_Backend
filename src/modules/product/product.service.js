@@ -9,6 +9,9 @@ import {
   updateProductRepository,
   deleteProductRepository
 } from './product.repository.js';
+import {
+  getUnitByIdRepository
+} from './unit/unit.repository.js';
 import { productDTO } from './product.dto.js';
 import { 
     parseNumericRangeFromQuery,
@@ -98,7 +101,7 @@ export const createProductService = async (data) => {
         throw new Error('Ya existe un producto con el mismo código');
     }
 
-    const existingUnit = await getProductByUnitIdRepository(unit_id);
+    const existingUnit = await getUnitByIdRepository(unit_id);
     if (!existingUnit) {
         throw new Error('La unidad especificada no existe');
     }
@@ -131,7 +134,7 @@ export const updateProductService = async (id, data) => {
         throw new Error('Ya existe un producto con el mismo código');
     }
 
-    const existingUnit = await getProductByUnitIdRepository(unit_id);
+    const existingUnit = await getUnitByIdRepository(unit_id);
     if (!existingUnit) {
         throw new Error('La unidad especificada no existe');
     }
