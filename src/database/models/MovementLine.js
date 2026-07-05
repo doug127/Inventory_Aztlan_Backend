@@ -26,7 +26,7 @@ export const MovementLine = sequelize.define('movement_lines', {
         }
     },
     quantity: {
-        type: DataTypes.INTEGER,
+        type: DataTypes.FLOAT,
         allowNull: false,
         validate: {
             min: 1

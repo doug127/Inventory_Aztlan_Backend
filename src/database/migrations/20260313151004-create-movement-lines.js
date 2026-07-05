@@ -24,7 +24,7 @@ export const up = async (queryInterface, Sequelize) => {
       }
     },
     quantity: {
-      type: Sequelize.INTEGER,
+      type: Sequelize.FLOAT,
       allowNull: false, 
       validate: {
         min: 1
