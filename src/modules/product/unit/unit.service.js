@@ -8,12 +8,65 @@ import {
 } from './unit.repository.js';
 import { unitDTO } from './unit.dto.js';
 
-export const getAllUnitsService = async () => {
-    const units = await getAllUnitsRepository();
+export const getAllUnitsService = async (query) => {
+    const filters = {}
 
-    const payload = units.map(unit => unitDTO(unit));
+    if (query.name)
+        filters.name = query.name.trim();
 
-    return payload;
+    if (query.code)
+        filters.code = query.code.trim();
+
+    if (query.base_unit)
+        filters.base_unit = query.base_unit.trim();
+
+    if (query.is_active !== undefined)
+        filters.is_active = query.is_active;
+
+    const order = query.order === "DESC"
+        ? "DESC"
+        : "ASC";
+
+    const page = Number(query.page) || 1;
+    const limit = Number(query.limit) || 10;
+
+    if (page < 1)
+        throw new Error(
+            "El número de página debe ser mayor o igual a 1"
+        );
+
+    if (limit < 1)
+        throw new Error(
+            "El límite debe ser mayor o igual a 1"
+        );
+
+    const offset = (page - 1) * limit;
+
+    const {
+        rows,
+        count,
+    } = await getAllUnitsRepository({
+        filters,
+        limit,
+        offset,
+        order,
+    });
+
+    const payload = rows.map(unitDTO);
+
+    return {
+        data: payload,
+        meta: {
+            total: count,
+            page,
+            limit,
+            totalPages: Math.ceil(count / limit),
+            hasNextPage:
+                page < Math.ceil(count / limit),
+            hasPreviousPage:
+                page > 1,
+        },
+    };
 }
 
 export const getUnitByIdService = async (id) => {

@@ -9,7 +9,7 @@ import {
 
 export const getAllUnitsController = async (req, res) => {
     try {
-        const units = await getAllUnitsService();
+        const units = await getAllUnitsService(req.query);
         res.status(200).json(units);
     } catch (error) {
         res.status(500).json({ error: error.message });
