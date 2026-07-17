@@ -85,7 +85,6 @@ export const getAllByFilterProductsService = async (query) => {
 
 export const createProductService = async (data) => {
     const { name, code, unit_id, min_stock, max_stock } = data;
-    console.log('Data recibida en el servicio:', data);
     
     if (min_stock >= max_stock) {
         throw new Error('El stock mínimo no puede ser mayor o igual al stock máximo');
