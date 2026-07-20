@@ -9,7 +9,7 @@ import {
 
 export const getAllProductsController = async (req, res) => {   
     try {
-        const products = await getAllProductsService();
+        const products = await getAllProductsService(req.user);
         res.status(200).json(products);
     } catch (error) {
         res.status(500).json({ message: error.message });
@@ -19,7 +19,7 @@ export const getAllProductsController = async (req, res) => {
 export const getProductByIdController = async (req, res) => {
     try {
         const { id } = req.params;
-        const product = await getProductByIdService(id);
+        const product = await getProductByIdService(id, req.user);
         res.status(200).json(product);
     } catch (error) {
         res.status(404).json({ message: error.message });
@@ -28,7 +28,7 @@ export const getProductByIdController = async (req, res) => {
 
 export const getAllByFilterProductsController = async (req, res) => {
     try {
-        const products = await getAllByFilterProductsService(req.query);
+        const products = await getAllByFilterProductsService(req.query, req.user);
         res.status(200).json(products);
     } catch (error) {
         res.status(400).json({ message: error.message });

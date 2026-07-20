@@ -1,8 +1,11 @@
 import { Product, Unit, CategoryProduct} from '#src/database/models/index.model.js';
 import { Op } from 'sequelize';
 
-export const getAllProductsRepository = async () => {
+export const getAllProductsRepository = async ({ includeInactive = false } = {}) => {
+    const where = includeInactive ? {} : { is_active: true };
+
     return await Product.findAll({
+        where,
         attributes: ['id', 'name', 'code', 'content_quantity', 'min_stock', 'max_stock'],
         include: [
             {
@@ -22,10 +25,13 @@ export const getAllByFilterProductsRepository = async ({
     filters,
     limit,
     offset,
-    order
+    order,
+    includeInactive = false
 }) => {
 
-    const where = {};
+    const where = includeInactive ? {} : {
+        is_active: true
+    };
 
     if (filters.name) where.name = { [Op.iLike]: `%${filters.name}%` };
     if (filters.content_quantity) where.content_quantity = filters.content_quantity; 
@@ -60,8 +66,12 @@ export const getAllByFilterProductsRepository = async ({
     });
 };
 
-export const getProductByIdRepository = async (id) => {
-    return await Product.findByPk(id, {
+export const getProductByIdRepository = async (id, { includeInactive = false } = {}) => {
+    return await Product.findOne({
+        where: {
+            id,
+            ...(includeInactive ? {} : { is_active: true })
+        },
         attributes: ['id', 'name', 'code', 'content_quantity', 'min_stock', 'max_stock'],
         include: [
             {

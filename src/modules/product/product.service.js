@@ -19,19 +19,22 @@ import {
     getLowerBound,
     getUpperBound,
 } from '#src/shared/utils/query.js';
+import { shouldIncludeInactiveProducts } from '#src/shared/utils/hierarchyLevel.js'
 
-export const getAllProductsService = async () => {
-    const products = await getAllProductsRepository();
+export const getAllProductsService = async (currentUser = {}) => {
+    const includeInactive = shouldIncludeInactiveProducts(currentUser);
+    const products = await getAllProductsRepository({ includeInactive });
 
     const payload = products.map(productDTO);
     
     return payload;
 }
 
-export const getProductByIdService = async (id) => {
-    const product = await getProductByIdRepository(id);
+export const getProductByIdService = async (id, currentUser = {}) => {
+    const includeInactive = shouldIncludeInactiveProducts(currentUser);
+    const product = await getProductByIdRepository(id, { includeInactive });
     
-    if (!product) {
+    if (!product || (!includeInactive && product.is_active === false)) {
         throw new Error('Producto no encontrado');
     }
 
@@ -40,7 +43,7 @@ export const getProductByIdService = async (id) => {
     return payload;
 }
 
-export const getAllByFilterProductsService = async (query) => {
+export const getAllByFilterProductsService = async (query, currentUser = {}) => {
     
     const filters = {};
 
@@ -60,12 +63,15 @@ export const getAllByFilterProductsService = async (query) => {
 
     // REPOSITORY
 
+    const includeInactive = shouldIncludeInactiveProducts(currentUser);
+
     const { rows, count } =
         await getAllByFilterProductsRepository({
             filters,
             limit,
             offset,
-            order
+            order,
+            includeInactive
         });
 
     const payload = rows.map(productDTO);
