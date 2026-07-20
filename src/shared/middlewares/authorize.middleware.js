@@ -13,9 +13,9 @@ export const authorizeRole = (minRoleName) => {
         });
       }
 
-      const userHierarchy = req.user?.role?.hierarchy;
+      const userHierarchy = req.user?.hierarchy_level ?? req.user?.role?.hierarchy_level;
 
-      if (userHierarchy < minRole.hierarchy) {
+      if (userHierarchy === undefined || userHierarchy < minRole.hierarchy_level) {
         return res.status(403).json({
           message: 'Acceso denegado'
         });
