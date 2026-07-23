@@ -9,8 +9,26 @@ import {
 } from './user.repository.js';
 import { findRoleByName } from '../role/role.repository.js';
 import { userResponseDTO } from './user.dto.js';
+import { shouldIncludeInactive } from '#src/shared/utils/hierarchyLevel.js'
 
-export const getAllUsersService = async (currentUser) => {
+export const getAllUsersService = async (query, currentUser = {}) => {
+  query = query || {};
+    const filters = {}
+
+  if (query.fullname) filters.fullname = query.fullname.trim();
+  if (query.username) filters.username = query.username.trim();
+  if (query.role) filters.role = query.role.trim();
+
+  const order = query.order === 'DESC' ? 'DESC' : 'ASC';
+  const page = Number(query.page) || 1;
+  const limit = Number(query.limit) || 10;
+
+    if (page < 1) throw new Error( 'El número de página debe ser mayor o igual a 1' );
+
+    if (limit < 1) throw new Error( 'El límite debe ser mayor o igual a 1' );
+
+    const offset = (page - 1) * limit;
+
     const userWithRole = await findUserWithRoleByIdRepository(currentUser.id);
 
     if (!userWithRole) {
@@ -19,15 +37,29 @@ export const getAllUsersService = async (currentUser) => {
 
     const currentLevel = userWithRole.role.hierarchy_level;
 
-    const users = await findAllUsersRepository(currentLevel);
+    const includeInactive = shouldIncludeInactive(currentUser);
+    const { rows, count } = await findAllUsersRepository({
+      filters,
+      currentLevel,
+      limit,
+      offset,
+      order,
+      includeInactive
+    });
 
-    if (!users || users.length === 0) {
-        throw new Error('No se encontraron usuarios');
-    }
+    const payload = rows.map(user => userResponseDTO(user));
 
-    const payload = users.map(user => userResponseDTO(user));
-
-    return payload;
+    return {
+      data: payload,
+      meta: {
+        total: count,
+        page,
+        limit,
+        totalPages: Math.ceil(count / limit),
+        hasNextPage: page < Math.ceil(count / limit),
+        hasPreviousPage: page > 1
+      }
+    };
 }
 
 export const getUserByIdService = async (id) => {

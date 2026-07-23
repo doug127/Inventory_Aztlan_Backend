@@ -19,20 +19,41 @@ export const findUserWithRoleByIdRepository = async (id) => {
     });
 };
 
-export const findAllUsersRepository = async (currentLevel) => {
-    return await User.findAll({ 
-      attributes: { exclude: ['password', 'createdAt', 'updatedAt'] },
-      include: {
-        model: Role,
-        attributes: ['id', 'name', 'hierarchy_level'],
-        required: true,
-        where: {
-            hierarchy_level: {
-                [Op.lte]: currentLevel
-            }
-        }
-      } 
-    });
+export const findAllUsersRepository = async ({
+  filters = {},
+  currentLevel,
+  limit,
+  offset,
+  order = 'ASC',
+  includeInactive = false
+}) => {
+  const where = includeInactive ? {} : { is_active: true };
+
+  if (filters.fullname) where.fullname = { [Op.iLike]: `%${filters.fullname}%` };
+  if (filters.username) where.username = { [Op.iLike]: `%${filters.username}%` };
+
+  const roleWhere = {
+    hierarchy_level: {
+      [Op.lte]: currentLevel
+    }
+  };
+
+  if (filters.role) roleWhere.name = { [Op.iLike]: `%${filters.role}%` };
+
+  return await User.findAndCountAll({
+    where,
+    attributes: { exclude: ['password', 'createdAt', 'updatedAt'] },
+    include: {
+      model: Role,
+      attributes: ['id', 'name', 'hierarchy_level'],
+      required: true,
+      where: roleWhere
+    },
+    limit,
+    offset,
+    distinct: true,
+    order: [['fullname', order]]
+  });
 };
 
 export const findUserByIdRepository = async (id) => {

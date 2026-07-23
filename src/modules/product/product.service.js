@@ -19,10 +19,10 @@ import {
     getLowerBound,
     getUpperBound,
 } from '#src/shared/utils/query.js';
-import { shouldIncludeInactiveProducts } from '#src/shared/utils/hierarchyLevel.js'
+import { shouldIncludeInactive } from '#src/shared/utils/hierarchyLevel.js'
 
 export const getAllProductsService = async (currentUser = {}) => {
-    const includeInactive = shouldIncludeInactiveProducts(currentUser);
+    const includeInactive = shouldIncludeInactive(currentUser);
     const products = await getAllProductsRepository({ includeInactive });
 
     const payload = products.map(productDTO);
@@ -63,7 +63,7 @@ export const getAllByFilterProductsService = async (query, currentUser = {}) => 
 
     // REPOSITORY
 
-    const includeInactive = shouldIncludeInactiveProducts(currentUser);
+    const includeInactive = shouldIncludeInactive(currentUser);
 
     const { rows, count } =
         await getAllByFilterProductsRepository({

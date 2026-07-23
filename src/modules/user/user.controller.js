@@ -8,7 +8,7 @@ import {
 
 export const getUsersController = async (req, res) => {
     try {
-        const users = await getAllUsersService(req.user);
+        const users = await getAllUsersService(req.query, req.user);
         res.status(200).json(users);
     } catch (error) {
         res.status(500).json({ error: error.message });
