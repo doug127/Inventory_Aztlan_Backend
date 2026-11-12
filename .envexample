@@ -13,3 +13,7 @@ DB_PASSWORD=your_password
 # Seguridad / Auth
 JWT_SECRET=una_clave_super_secreta
 SESSION_SECRET=otra_clave_secreta
+
+# Semilla del SUPERADMIN inicial (si falta la contraseña se genera una temporal y se muestra al sembrar)
+SEED_SUPERADMIN_EMAIL=superadmin@aztlan.local
+SEED_SUPERADMIN_PASSWORD=
