@@ -11,6 +11,7 @@ import {
   REFRESH_TOKEN_TTL_MS,
 } from '#src/shared/constants/auth.js';
 import { EMAIL_TEMPLATES } from '#src/shared/constants/email.js';
+import { passwordPolicyIssues } from '#src/shared/schemas/password.js';
 import * as emailService from '#src/modules/email/email.service.js';
 import * as authRepository from './auth.repository.js';
 import { generateOpaqueToken, hashToken, signAccessToken } from './token.service.js';
@@ -248,6 +249,60 @@ export const getCurrentUser = async (actor) => {
   const user = await authRepository.findUserById(actor.id);
   if (!user) throw new AppError('AUTH_TOKEN_INVALID');
   return toAuthUserDto(user);
+};
+
+const fieldIssue = (path, message) => ({ location: 'body', path, message });
+
+/**
+ * HU-104: cambio de contraseña (obligatorio si must_change_password = true).
+ *
+ * business_rules.md §9.2.3: actualiza password_changed_at (los access tokens anteriores dejan de
+ * servir), revoca TODOS los refresh tokens del usuario y encola el correo PASSWORD_CHANGED.
+ * Devuelve una sesión nueva solo para este dispositivo, así el usuario no tiene que volver a
+ * escribir la contraseña que acaba de crear; los demás dispositivos quedan desconectados.
+ */
+export const changePassword = async (actor, { currentPassword, newPassword }, context = {}) => {
+  const user = await authRepository.findUserWithPasswordById(actor.id);
+  if (!user) throw new AppError('AUTH_TOKEN_INVALID');
+
+  if (!(await bcrypt.compare(currentPassword, user.passwordHash))) {
+    throw new AppError('VALIDATION_ERROR', {
+      message: 'La contraseña actual no es correcta',
+      details: [fieldIssue('currentPassword', 'La contraseña actual no es correcta')],
+    });
+  }
+
+  const issues = passwordPolicyIssues(newPassword);
+  if (issues.length) {
+    throw new AppError('AUTH_WEAK_PASSWORD', { details: issues.map((message) => fieldIssue('newPassword', message)) });
+  }
+  if (await bcrypt.compare(newPassword, user.passwordHash)) {
+    const message = 'La contraseña nueva debe ser distinta de la actual';
+    throw new AppError('AUTH_WEAK_PASSWORD', { message, details: [fieldIssue('newPassword', message)] });
+  }
+
+  const passwordHash = await bcrypt.hash(newPassword, BCRYPT_COST);
+  const passwordChangedAt = new Date();
+
+  const refreshToken = await withTransaction(async (transaction) => {
+    await authRepository.updateUser(user.id, { passwordHash, passwordChangedAt, mustChangePassword: false }, { transaction });
+    await authRepository.revokeAllRefreshTokens(user.id, { transaction });
+    await authRepository.createAuthEvent(
+      { userId: user.id, usernameAttempted: user.username, eventType: AUTH_EVENT_TYPES.PASSWORD_CHANGED, ...eventContext(context) },
+      { transaction }
+    );
+    await emailService.enqueueEmail(
+      { userId: user.id, toEmail: user.email, template: EMAIL_TEMPLATES.PASSWORD_CHANGED },
+      { transaction }
+    );
+    // Se crea después de revocar, con fecha posterior a password_changed_at.
+    return issueRefreshToken(user.id, context, { transaction });
+  });
+
+  return {
+    session: buildSession({ ...user, passwordChangedAt, mustChangePassword: false }),
+    refreshToken,
+  };
 };
 
 /**

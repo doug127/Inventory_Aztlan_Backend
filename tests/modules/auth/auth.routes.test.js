@@ -420,6 +420,116 @@ describe('POST /api/auth/logout', () => {
   });
 });
 
+describe('cambio obligatorio de contraseña (HU-104)', () => {
+  const NEW = 'Nueva-Clave-2026';
+  let protectedApi;
+
+  const changePassword = (accessToken, body, cookie) =>
+    api.post('/api/auth/change-password', { token: accessToken, body, cookie });
+
+  beforeAll(async () => {
+    const mini = express();
+    mini.use(requestId);
+    mini.get('/api/stock', auth, (req, res) => res.json({ success: true, data: req.user }));
+    mini.use(errorHandler);
+    protectedApi = await startServer(mini);
+  });
+
+  afterAll(() => protectedApi?.close());
+
+  it('el login informa mustChangePassword y el resto del API responde 403 AUTH_PASSWORD_CHANGE_REQUIRED', async () => {
+    const nuevo = await createTestUser({ name: 'temporal.pwd', mustChangePassword: true });
+    const login = await api.post('/api/auth/login', { body: { username: nuevo.username, password: nuevo.password } });
+    expect(login.status).toBe(200);
+    expect(login.body.data.user.mustChangePassword).toBe(true);
+    const token = login.body.data.accessToken;
+
+    const blocked = await protectedApi.get('/api/stock', { token });
+    expect(blocked.status).toBe(403);
+    expect(blocked.body.error.code).toBe('AUTH_PASSWORD_CHANGE_REQUIRED');
+
+    // Lo permitido mientras tanto: ver su perfil y cerrar sesión.
+    expect((await api.get('/api/auth/me', { token })).status).toBe(200);
+    expect((await api.post('/api/auth/logout', { token })).status).toBe(204);
+  });
+
+  it('flujo completo: cambia la contraseña, obtiene una sesión nueva y ya puede usar el API', async () => {
+    const nuevo = await createTestUser({ name: 'cambio', mustChangePassword: true });
+    const laptop = await loginWithCookie(nuevo);
+    const phone = await loginWithCookie(nuevo);
+    // Un access token emitido antes del cambio (iat en el pasado).
+    const oldAccess = jwt.sign({ sub: String(nuevo.id), iat: Math.floor(Date.now() / 1000) - 5 }, process.env.JWT_SECRET, { expiresIn: 900 });
+
+    const res = await changePassword(laptop.accessToken, { currentPassword: nuevo.password, newPassword: NEW }, laptop.cookie);
+
+    expect(res.status).toBe(200);
+    expect(res.body.data).toMatchObject({ tokenType: 'Bearer', user: { id: nuevo.id, mustChangePassword: false } });
+    const newCookie = res.readCookie(REFRESH);
+    expect(newCookie.value).toBeTruthy();
+    expect(newCookie.value).not.toBe(laptop.raw);
+
+    // El access token nuevo ya pasa la restricción; el emitido antes del cambio no sirve.
+    expect((await protectedApi.get('/api/stock', { token: res.body.data.accessToken })).status).toBe(200);
+    const stale = await api.get('/api/auth/me', { token: oldAccess });
+    expect(stale.status).toBe(401);
+    expect(stale.body.error.code).toBe('AUTH_TOKEN_INVALID');
+
+    // Todas las sesiones anteriores quedan revocadas; solo vale la cookie nueva.
+    expect((await api.post('/api/auth/refresh', { cookie: laptop.cookie })).status).toBe(401);
+    expect((await api.post('/api/auth/refresh', { cookie: phone.cookie })).status).toBe(401);
+    expect((await api.post('/api/auth/refresh', { cookie: `${REFRESH}=${newCookie.value}` })).status).toBe(200);
+
+    // La contraseña vieja ya no entra y la nueva sí.
+    expect((await api.post('/api/auth/login', { body: { username: nuevo.username, password: nuevo.password } })).status).toBe(401);
+    expect((await api.post('/api/auth/login', { body: { username: nuevo.username, password: NEW } })).status).toBe(200);
+
+    const user = await User.findByPk(nuevo.id);
+    expect(user.mustChangePassword).toBe(false);
+    expect(await findEmails({ userId: nuevo.id, template: 'PASSWORD_CHANGED' })).toHaveLength(1);
+    expect(await lastAuthEvent({ userId: nuevo.id, eventType: 'PASSWORD_CHANGED' })).not.toBeNull();
+  });
+
+  it('400 VALIDATION_ERROR si la contraseña actual no es correcta', async () => {
+    const nuevo = await createTestUser({ name: 'actual.mal', mustChangePassword: true });
+    const { accessToken } = await loginWithCookie(nuevo);
+    const { status, body } = await changePassword(accessToken, { currentPassword: 'Incorrecta-1', newPassword: NEW });
+    expect(status).toBe(400);
+    expect(body.error).toMatchObject({ code: 'VALIDATION_ERROR', details: [expect.objectContaining({ path: 'currentPassword' })] });
+    expect((await User.findByPk(nuevo.id)).mustChangePassword).toBe(true);
+  });
+
+  it('400 AUTH_WEAK_PASSWORD si la nueva no cumple la política o es igual a la actual', async () => {
+    const nuevo = await createTestUser({ name: 'debil', password: 'Clave-Actual-1', mustChangePassword: true });
+    const { accessToken } = await loginWithCookie(nuevo);
+
+    const weak = await changePassword(accessToken, { currentPassword: nuevo.password, newPassword: 'sinmayuscula1' });
+    expect(weak.status).toBe(400);
+    expect(weak.body.error.code).toBe('AUTH_WEAK_PASSWORD');
+    expect(weak.body.error.details).toEqual([
+      { location: 'body', path: 'newPassword', message: 'La contraseña debe tener al menos una letra mayúscula' },
+    ]);
+
+    const same = await changePassword(accessToken, { currentPassword: nuevo.password, newPassword: nuevo.password });
+    expect(same.status).toBe(400);
+    expect(same.body.error.code).toBe('AUTH_WEAK_PASSWORD');
+  });
+
+  it('400 VALIDATION_ERROR si faltan campos, y 401 sin sesión', async () => {
+    const { accessToken } = await loginWithCookie(almacenista);
+    const missing = await changePassword(accessToken, { currentPassword: almacenista.password });
+    expect(missing.status).toBe(400);
+    expect(missing.body.error.details[0]).toMatchObject({ path: 'newPassword' });
+
+    expect((await changePassword(undefined, { currentPassword: 'a', newPassword: 'b' })).status).toBe(401);
+  });
+
+  it('un usuario sin cambio pendiente también puede cambiar su contraseña cuando quiera', async () => {
+    const normal = await createTestUser({ name: 'voluntario' });
+    const { accessToken } = await loginWithCookie(normal);
+    expect((await changePassword(accessToken, { currentPassword: normal.password, newPassword: NEW })).status).toBe(200);
+  });
+});
+
 describe('permisos por rol con tokens reales (auth + authorizeRole)', () => {
   let protectedApi;
 

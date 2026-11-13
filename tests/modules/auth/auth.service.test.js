@@ -6,6 +6,7 @@ import jwt from 'jsonwebtoken';
 vi.mock('#src/modules/auth/auth.repository.js', () => ({
   findUserForLogin: vi.fn(),
   findUserById: vi.fn(),
+  findUserWithPasswordById: vi.fn(),
   findLoginStateForUpdate: vi.fn(),
   updateUser: vi.fn(),
   createAuthEvent: vi.fn(),
@@ -20,7 +21,9 @@ vi.mock('#src/modules/email/email.service.js', () => ({ enqueueEmail: vi.fn() })
 const authRepository = await import('#src/modules/auth/auth.repository.js');
 const emailService = await import('#src/modules/email/email.service.js');
 const { hashToken } = await import('#src/modules/auth/token.service.js');
-const { login, refreshSession, resolveSessionUser, getCurrentUser, logout } = await import('#src/modules/auth/auth.service.js');
+const { login, refreshSession, resolveSessionUser, getCurrentUser, logout, changePassword } = await import(
+  '#src/modules/auth/auth.service.js'
+);
 
 const PASSWORD = 'Clave-Correcta-9';
 const DAY = 24 * 60 * 60 * 1000;
@@ -319,6 +322,65 @@ describe('resolveSessionUser', () => {
   it('usuario desactivado después del login: AUTH_ACCOUNT_INACTIVE', async () => {
     authRepository.findUserById.mockResolvedValue(userRow({ isActive: false }));
     await expectAppError(resolveSessionUser({ userId: 7, iat: 2_000_000_000 }), 'AUTH_ACCOUNT_INACTIVE');
+  });
+});
+
+describe('changePassword (HU-104)', () => {
+  const actor = { id: 7, username: 'pedro.gomez' };
+  const NEW = 'Nueva-Clave-2026';
+
+  beforeEach(() => {
+    authRepository.findUserWithPasswordById.mockResolvedValue(userRow({ mustChangePassword: true }));
+  });
+
+  it('cambia el hash, quita must_change_password, revoca sesiones, registra el evento y encola el correo', async () => {
+    const { session, refreshToken } = await changePassword(actor, { currentPassword: PASSWORD, newPassword: NEW }, { ip: '10.0.0.5' });
+
+    const [id, changes, opts] = authRepository.updateUser.mock.calls[0];
+    expect(id).toBe(7);
+    expect(opts).toEqual({ transaction: 'tx' });
+    expect(changes.mustChangePassword).toBe(false);
+    expect(changes.passwordChangedAt).toBeInstanceOf(Date);
+    expect(changes.passwordHash).not.toBe(NEW);
+    expect(await bcrypt.compare(NEW, changes.passwordHash)).toBe(true);
+
+    expect(authRepository.revokeAllRefreshTokens).toHaveBeenCalledWith(7, { transaction: 'tx' });
+    expect(authRepository.createAuthEvent).toHaveBeenCalledWith(
+      expect.objectContaining({ userId: 7, eventType: 'PASSWORD_CHANGED', ipAddress: '10.0.0.5' }), { transaction: 'tx' }
+    );
+    expect(emailService.enqueueEmail).toHaveBeenCalledWith(
+      { userId: 7, toEmail: 'pedro@aztlan.test', template: 'PASSWORD_CHANGED' }, { transaction: 'tx' }
+    );
+
+    // Sesión nueva para este dispositivo, creada después de revocar las anteriores.
+    expect(session.user.mustChangePassword).toBe(false);
+    expect(session.accessToken).toBeTruthy();
+    expect(refreshToken.value).toBeTruthy();
+    const revokeOrder = authRepository.revokeAllRefreshTokens.mock.invocationCallOrder[0];
+    const createOrder = authRepository.createRefreshToken.mock.invocationCallOrder[0];
+    expect(createOrder).toBeGreaterThan(revokeOrder);
+  });
+
+  it('contraseña actual incorrecta: VALIDATION_ERROR en currentPassword y no cambia nada', async () => {
+    const error = await changePassword(actor, { currentPassword: 'otra', newPassword: NEW }).catch((e) => e);
+    expect(error.code).toBe('VALIDATION_ERROR');
+    expect(error.details).toEqual([expect.objectContaining({ path: 'currentPassword' })]);
+    expect(authRepository.updateUser).not.toHaveBeenCalled();
+  });
+
+  it('contraseña nueva que no cumple la política: AUTH_WEAK_PASSWORD con cada regla incumplida', async () => {
+    const error = await changePassword(actor, { currentPassword: PASSWORD, newPassword: 'corta' }).catch((e) => e);
+    expect(error.code).toBe('AUTH_WEAK_PASSWORD');
+    expect(error.details.map((d) => d.message)).toEqual(
+      expect.arrayContaining(['La contraseña debe tener al menos 8 caracteres', 'La contraseña debe tener al menos un número'])
+    );
+    expect(authRepository.updateUser).not.toHaveBeenCalled();
+  });
+
+  it('contraseña nueva igual a la actual: AUTH_WEAK_PASSWORD', async () => {
+    const error = await changePassword(actor, { currentPassword: PASSWORD, newPassword: PASSWORD }).catch((e) => e);
+    expect(error).toMatchObject({ code: 'AUTH_WEAK_PASSWORD', message: 'La contraseña nueva debe ser distinta de la actual' });
+    expect(authRepository.updateUser).not.toHaveBeenCalled();
   });
 });
 

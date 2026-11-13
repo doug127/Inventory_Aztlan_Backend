@@ -44,6 +44,13 @@ export const refreshController = async (req, res) => {
 
 export const meController = async (req, res) => sendOk(res, await authService.getCurrentUser(req.user));
 
+export const changePasswordController = async (req, res) => {
+  addLogContext(res, { target: req.user.username });
+  const { session, refreshToken } = await authService.changePassword(req.user, req.validated.body, requestContext(req));
+  setRefreshCookie(res, refreshToken);
+  return sendOk(res, session);
+};
+
 export const logoutController = async (req, res) => {
   await authService.logout(req.user, req.cookies?.[REFRESH_COOKIE_NAME], requestContext(req));
   clearRefreshCookie(res);

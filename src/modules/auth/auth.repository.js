@@ -12,6 +12,9 @@ const plain = (row) => (row ? row.get({ plain: true }) : null);
 export const findUserForLogin = async (username, { transaction } = {}) =>
   plain(await User.unscoped().findOne({ where: { username }, include: [ROLE_INCLUDE], transaction }));
 
+export const findUserWithPasswordById = async (id, { transaction } = {}) =>
+  plain(await User.unscoped().findByPk(id, { include: [ROLE_INCLUDE], transaction }));
+
 export const findUserById = async (id, { transaction } = {}) =>
   plain(await User.findByPk(id, { include: [ROLE_INCLUDE], transaction }));
 
