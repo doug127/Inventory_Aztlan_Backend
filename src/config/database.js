@@ -1,14 +1,10 @@
+import { createRequire } from 'node:module';
 import { Sequelize } from 'sequelize';
-import 'dotenv/config';
 
-export const sequelize = new Sequelize(
-  process.env.DB_NAME,
-  process.env.DB_USER,
-  process.env.DB_PASSWORD,
-  {
-    host: process.env.DB_HOST,
-    port: process.env.DB_PORT,
-    dialect: process.env.DB_DIALECT,
-    logging: false,
-  }
-);
+const require = createRequire(import.meta.url);
+const configs = require('./config.cjs');
+
+export const env = process.env.NODE_ENV || 'development';
+const config = configs[env] ?? configs.development;
+
+export const sequelize = new Sequelize(config.database, config.username, config.password, config);

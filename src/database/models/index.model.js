@@ -13,10 +13,20 @@ import {MovementLine} from './MovementLine.js';
 import {AssetType} from './AssetType.js';
 import {Asset} from './Asset.js';
 import {MovementTarget} from './MovementTarget.js';
+import {AuthEvent} from './AuthEvent.js';
+import {RefreshToken} from './RefreshToken.js';
+import {EmailOutbox} from './EmailOutbox.js';
 
-// * Relación uno a muchos entre Role y User
-Role.hasMany(User, { foreignKey: 'id' });
-User.belongsTo(Role, { foreignKey: 'role_id' });
+// * Seguridad y autenticación (esquema nuevo, atributos camelCase)
+Role.hasMany(User, { foreignKey: 'roleId', as: 'users' });
+User.belongsTo(Role, { foreignKey: 'roleId', as: 'role' });
+User.hasMany(AuthEvent, { foreignKey: 'userId', as: 'authEvents' });
+AuthEvent.belongsTo(User, { foreignKey: 'userId', as: 'user' });
+User.hasMany(RefreshToken, { foreignKey: 'userId', as: 'refreshTokens' });
+RefreshToken.belongsTo(User, { foreignKey: 'userId', as: 'user' });
+RefreshToken.belongsTo(RefreshToken, { foreignKey: 'replacedByTokenId', as: 'replacedBy' });
+User.hasMany(EmailOutbox, { foreignKey: 'userId', as: 'emails' });
+EmailOutbox.belongsTo(User, { foreignKey: 'userId', as: 'user' });
 
 // * Relación uno a muchos entre CategoryProduct y Product
 CategoryProduct.hasMany(Product, { foreignKey: 'product_category_id' });
@@ -118,5 +128,8 @@ export {
   MovementLine,
   AssetType,
   Asset,
-  MovementTarget
+  MovementTarget,
+  AuthEvent,
+  RefreshToken,
+  EmailOutbox
 };

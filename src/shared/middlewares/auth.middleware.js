@@ -1,17 +1,20 @@
-import jwt from 'jsonwebtoken';
 import { AppError } from '../errors/AppError.js';
+import { verifyAccessToken } from '#src/modules/auth/token.service.js';
+import { resolveSessionUser } from '#src/modules/auth/auth.service.js';
 
-// Verifica la sesión. La reescritura completa (access token de 15 min, refresh, password_changed_at)
-// corresponde a HU-101/HU-102 del Sprint 2.
-export const auth = (req, _res, next) => {
-  const token = req.cookies?.session;
-  if (!token) return next(new AppError('AUTH_TOKEN_MISSING'));
+/**
+ * Verifica la sesión: header "Authorization: Bearer <access token>", firma y vigencia del token,
+ * usuario activo y token emitido después del último cambio de contraseña.
+ * Deja en req.user: { id, username, roleCode, hierarchy, mustChangePassword }.
+ *
+ * Es async: en Express 5 un throw aquí llega al errorHandler.
+ * La restricción por must_change_password llega con HU-104.
+ */
+export const auth = async (req, _res, next) => {
+  const header = req.get('Authorization');
+  if (!header?.startsWith('Bearer ')) throw new AppError('AUTH_TOKEN_MISSING');
 
-  try {
-    req.user = jwt.verify(token, process.env.JWT_SECRET);
-    return next();
-  } catch (err) {
-    const code = err?.name === 'TokenExpiredError' ? 'AUTH_TOKEN_EXPIRED' : 'AUTH_TOKEN_INVALID';
-    return next(new AppError(code, { cause: err }));
-  }
+  const payload = verifyAccessToken(header.slice(7).trim());
+  req.user = await resolveSessionUser(payload);
+  next();
 };

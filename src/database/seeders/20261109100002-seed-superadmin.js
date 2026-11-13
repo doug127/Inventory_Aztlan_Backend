@@ -1,21 +1,27 @@
-// SUPERADMIN inicial. La contraseña sale de SEED_SUPERADMIN_PASSWORD; si no existe se genera una
-// temporal aleatoria y se muestra una sola vez. Siempre queda con must_change_password = true.
-import crypto from 'node:crypto';
+// SUPERADMIN inicial. La contraseña la define quien instala, en SEED_SUPERADMIN_PASSWORD (.env), y
+// debe cumplir la política de contraseñas. No se genera una aleatoria: una contraseña que solo se
+// muestra una vez en consola se pierde con facilidad y deja el sistema sin acceso.
+// El usuario queda con must_change_password = true.
+// Para restablecerla después: pnpm db:reset-superadmin
 import bcrypt from 'bcrypt';
+import { passwordPolicyIssues } from '../../shared/schemas/password.js';
+import { BCRYPT_COST } from '../../shared/constants/auth.js';
 
 const USERNAME = 'superadmin';
 
 export const up = async (queryInterface) => {
   const email = (process.env.SEED_SUPERADMIN_EMAIL || 'superadmin@aztlan.local').toLowerCase();
-  let password = process.env.SEED_SUPERADMIN_PASSWORD;
+  const password = process.env.SEED_SUPERADMIN_PASSWORD;
 
   if (!password) {
-    password = `Az${crypto.randomBytes(9).toString('base64url')}9`;
-    process.stdout.write(`\n[seed] SUPERADMIN '${USERNAME}' creado con contraseña temporal: ${password}\n`);
-    process.stdout.write('[seed] Se pedirá cambiarla en el primer inicio de sesión.\n\n');
+    throw new Error('Defina SEED_SUPERADMIN_PASSWORD en .env antes de ejecutar las semillas.');
+  }
+  const issues = passwordPolicyIssues(password);
+  if (issues.length) {
+    throw new Error(`SEED_SUPERADMIN_PASSWORD no cumple la política: ${issues.join('; ')}.`);
   }
 
-  const passwordHash = await bcrypt.hash(password, 12);
+  const passwordHash = await bcrypt.hash(password, BCRYPT_COST);
 
   await queryInterface.sequelize.query(
     `INSERT INTO users (username, email, password_hash, full_name, role_id, must_change_password)

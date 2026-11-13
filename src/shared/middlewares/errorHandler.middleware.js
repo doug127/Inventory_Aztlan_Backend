@@ -41,6 +41,11 @@ export const errorHandler = (err, req, res, _next) => {
 
   if (res.headersSent) return;
 
+  // Bloqueos y límites de frecuencia indican cuándo reintentar (estándar HTTP).
+  if (error.expose && Number.isInteger(error.details?.retryAfterSeconds)) {
+    res.set('Retry-After', String(error.details.retryAfterSeconds));
+  }
+
   res.status(error.status).json({
     success: false,
     error: {

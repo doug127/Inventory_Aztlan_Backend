@@ -8,7 +8,11 @@
     "start": "node src/server.js",
     "test": "vitest",
     "test:watch": "vitest --watch",
-    "test:coverage": "vitest run --coverage"
+    "test:coverage": "vitest run --coverage",
+    "db:migrate": "sequelize-cli db:migrate",
+    "db:seed": "sequelize-cli db:seed:all",
+    "db:test:setup": "sequelize-cli db:migrate --env test && sequelize-cli db:seed:all --env test",
+    "db:reset-superadmin": "node src/database/scripts/reset-superadmin-password.js"
   },
   "imports": {
     "#src/*": "./src/*"
@@ -23,6 +27,7 @@
     "cors": "^2.8.6",
     "dotenv": "^17.2.3",
     "express": "^5.2.1",
+    "express-rate-limit": "^8.7.4",
     "express-session": "^1.18.2",
     "jsonwebtoken": "^9.0.3",
     "pg": "^8.16.3",

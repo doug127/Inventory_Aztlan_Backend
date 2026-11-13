@@ -1,47 +1,53 @@
-import { login } from './auth.service.js';
+import * as authService from './auth.service.js';
+import { addLogContext, sendNoContent, sendOk } from '#src/shared/http/response.js';
+import { REFRESH_COOKIE_NAME, REFRESH_COOKIE_PATH } from '#src/shared/constants/auth.js';
+
+// Sin try/catch: Express 5 lleva cualquier error de una función async al errorHandler.
+
+const requestContext = (req) => ({ ip: req.ip, userAgent: req.get('User-Agent') });
+
+// El refresh token vive solo en esta cookie: JavaScript del navegador no puede leerla (httpOnly),
+// no se envía a otros sitios (sameSite=strict) y solo viaja a /api/auth.
+// secure exige HTTPS; en desarrollo (http://localhost) se desactiva salvo COOKIE_SECURE=true.
+const refreshCookieOptions = () => ({
+  httpOnly: true,
+  secure: process.env.NODE_ENV === 'production' || process.env.COOKIE_SECURE === 'true',
+  sameSite: 'strict',
+  path: REFRESH_COOKIE_PATH,
+});
+
+const setRefreshCookie = (res, { value, expiresAt }) =>
+  res.cookie(REFRESH_COOKIE_NAME, value, { ...refreshCookieOptions(), expires: new Date(expiresAt) });
+
+const clearRefreshCookie = (res) => res.clearCookie(REFRESH_COOKIE_NAME, refreshCookieOptions());
 
 export const loginController = async (req, res) => {
-    try {
-        const { username, password } = req.validatedData;
-
-        const { user, token } = await login(username, password);
-        
-        res
-            .cookie('session', token, {
-                httpOnly: true,
-                sameSite: 'lax',
-                secure: false,
-                maxAge: 1000 * 60 * 60 // 1 hour
-            })
-            .json({ 
-                message: 'Login exitoso', 
-                user
-            });        
-    } catch (error) {
-        res.status(401).json({ error: error.message });
-    }
+  addLogContext(res, { target: req.validated.body.username });
+  const { session, refreshToken } = await authService.login(req.validated.body, requestContext(req));
+  setRefreshCookie(res, refreshToken);
+  return sendOk(res, session);
 };
 
-export const me = (req, res) => {
-    if (req.user) {
-        const userDTO = {
-            id: req.user.id,
-            username: req.user.username,
-            role: req.user.role,
-            hierarchy_level: req.user.hierarchy_level
-        };
-        res.json({ user: userDTO });
-    } else {
-        res.status(401).json({ error: 'No autenticado' });
-    }
+export const refreshController = async (req, res) => {
+  try {
+    const { session, refreshToken } = await authService.refreshSession(req.cookies?.[REFRESH_COOKIE_NAME], requestContext(req));
+    setRefreshCookie(res, refreshToken);
+    addLogContext(res, { target: session.user.username });
+    return sendOk(res, session);
+  } catch (error) {
+    // Una cookie que ya no sirve se borra para que el cliente no la siga enviando.
+    // No se captura para silenciar: el error sigue su camino al errorHandler.
+    clearRefreshCookie(res);
+    throw error;
+  }
 };
 
-export const logoutController = (req, res) => {
-    res.clearCookie('session', {
-        httpOnly: true,
-        sameSite: 'lax',
-        secure: false
-    });
+export const meController = async (req, res) => sendOk(res, await authService.getCurrentUser(req.user));
 
-    res.status(200).json({ message: 'Sesión Cerrada' });
-}
+export const logoutController = async (req, res) => {
+  await authService.logout(req.user, req.cookies?.[REFRESH_COOKIE_NAME], requestContext(req));
+  clearRefreshCookie(res);
+  // Limpia la cookie de sesión del esquema anterior por si el navegador aún la tiene.
+  res.clearCookie('session', { httpOnly: true, sameSite: 'lax' });
+  return sendNoContent(res);
+};
