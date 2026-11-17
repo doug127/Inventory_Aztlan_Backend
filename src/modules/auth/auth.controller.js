@@ -51,6 +51,25 @@ export const changePasswordController = async (req, res) => {
   return sendOk(res, session);
 };
 
+// Respuesta única de "olvidé mi contraseña", exista o no el correo (business_rules.md §9.5.1).
+const FORGOT_PASSWORD_MESSAGE =
+  'Si el correo pertenece a una cuenta activa, recibirá un enlace para restablecer la contraseña. El enlace vence en 30 minutos.';
+
+export const forgotPasswordController = async (req, res) => {
+  await authService.requestPasswordReset(req.validated.body, requestContext(req));
+  return sendOk(res, { message: FORGOT_PASSWORD_MESSAGE }, { status: 202 });
+};
+
+export const validateResetTokenController = async (req, res) =>
+  sendOk(res, await authService.validateResetToken(req.validated.query.token));
+
+export const resetPasswordController = async (req, res) => {
+  await authService.resetPassword(req.validated.body, requestContext(req));
+  // Las sesiones se revocaron: la cookie de este navegador, si la hay, ya no sirve.
+  clearRefreshCookie(res);
+  return sendNoContent(res);
+};
+
 export const logoutController = async (req, res) => {
   await authService.logout(req.user, req.cookies?.[REFRESH_COOKIE_NAME], requestContext(req));
   clearRefreshCookie(res);

@@ -1,7 +1,7 @@
 // Consultas de autenticación. Es el único repository que lee passwordHash y tokenHash.
 // No valida ni lanza errores de negocio: devuelve objetos planos o null y el service decide.
-import { Transaction } from 'sequelize';
-import { User, Role, AuthEvent, RefreshToken } from '#src/database/models/index.model.js';
+import { Op, Transaction } from 'sequelize';
+import { User, Role, AuthEvent, RefreshToken, PasswordResetToken } from '#src/database/models/index.model.js';
 
 const ROLE_INCLUDE = { model: Role, as: 'role', attributes: ['id', 'code', 'name', 'hierarchy', 'isActive'] };
 
@@ -17,6 +17,13 @@ export const findUserWithPasswordById = async (id, { transaction } = {}) =>
 
 export const findUserById = async (id, { transaction } = {}) =>
   plain(await User.findByPk(id, { include: [ROLE_INCLUDE], transaction }));
+
+export const findUserByEmail = async (email, { transaction } = {}) =>
+  plain(await User.findOne({ where: { email }, transaction }));
+
+/** Bloquea la fila del usuario (FOR UPDATE) para serializar operaciones sobre su cuenta. */
+export const lockUser = async (id, { transaction } = {}) =>
+  plain(await User.findByPk(id, { attributes: ['id'], transaction, lock: Transaction.LOCK.UPDATE }));
 
 /** Estado de intentos fallidos con la fila bloqueada (FOR UPDATE), para contar sin carreras. */
 export const findLoginStateForUpdate = async (id, { transaction } = {}) =>
@@ -63,4 +70,36 @@ export const revokeAllRefreshTokens = async (userId, { transaction } = {}) => {
     { where: { userId, revokedAt: null }, transaction }
   );
   return count;
+};
+
+// --- Tokens de recuperación de contraseña -----------------------------------
+
+export const countResetTokensSince = async (userId, since, { transaction } = {}) =>
+  PasswordResetToken.count({ where: { userId, createdAt: { [Op.gte]: since } }, transaction });
+
+/** Invalida el token vigente del usuario (como máximo hay uno, por uq_reset_token_active). */
+export const invalidateActiveResetTokens = async (userId, { transaction } = {}) => {
+  await PasswordResetToken.update(
+    { invalidatedAt: new Date() },
+    { where: { userId, usedAt: null, invalidatedAt: null }, transaction }
+  );
+};
+
+export const createResetToken = async (data, { transaction } = {}) =>
+  plain(await PasswordResetToken.create(data, { transaction }));
+
+export const findResetTokenByHash = async (tokenHash, { transaction, lock = false } = {}) =>
+  plain(
+    await PasswordResetToken.findOne({
+      where: { tokenHash },
+      transaction,
+      lock: lock ? Transaction.LOCK.UPDATE : undefined,
+    })
+  );
+
+export const findResetTokenById = async (id, { transaction, lock = false } = {}) =>
+  plain(await PasswordResetToken.findByPk(id, { transaction, lock: lock ? Transaction.LOCK.UPDATE : undefined }));
+
+export const updateResetToken = async (id, changes, { transaction } = {}) => {
+  await PasswordResetToken.update(changes, { where: { id }, transaction });
 };

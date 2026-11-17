@@ -8,6 +8,8 @@ import {
   AUTH_EVENT_TYPES,
   BCRYPT_COST,
   MAX_FAILED_LOGIN_ATTEMPTS,
+  PASSWORD_RESET_MAX_PER_HOUR,
+  PASSWORD_RESET_TOKEN_TTL_MS,
   REFRESH_TOKEN_TTL_MS,
 } from '#src/shared/constants/auth.js';
 import { EMAIL_TEMPLATES } from '#src/shared/constants/email.js';
@@ -303,6 +305,148 @@ export const changePassword = async (actor, { currentPassword, newPassword }, co
     session: buildSession({ ...user, passwordChangedAt, mustChangePassword: false }),
     refreshToken,
   };
+};
+
+// --- Recuperación de contraseña (HU-105) -------------------------------------
+//
+// El token en claro NUNCA se guarda: ni en password_reset_tokens (solo su SHA-256) ni en
+// email_outbox (que no guarda el cuerpo del correo, db_schema.md §2). Por eso el token se genera
+// en el momento de enviar el correo, con prepareResetTokenForDelivery: al solicitar la recuperación
+// solo se crea la fila con un hash de relleno que no corresponde a ningún token entregado.
+
+const HOUR_MS = 60 * 60 * 1000;
+
+/**
+ * Solicitud de recuperación (business_rules.md §9.5). No devuelve nada: el controller responde
+ * siempre lo mismo, exista o no el correo, para no revelar qué cuentas existen.
+ * - Usuario inexistente o inactivo: no se crea token ni se envía correo.
+ * - Máximo PASSWORD_RESET_MAX_PER_HOUR solicitudes por hora por usuario (el límite por IP va en la ruta).
+ * - Una solicitud nueva invalida la anterior: solo hay un token vigente por usuario.
+ */
+export const requestPasswordReset = async ({ email }, context = {}) => {
+  const now = new Date();
+  const user = await authRepository.findUserByEmail(email);
+
+  await authRepository.createAuthEvent({
+    userId: user?.id ?? null,
+    usernameAttempted: email,
+    eventType: AUTH_EVENT_TYPES.PASSWORD_RESET_REQUESTED,
+    ...eventContext(context),
+  });
+
+  if (!user || !user.isActive) return;
+
+  await withTransaction(async (transaction) => {
+    // Serializa solicitudes simultáneas del mismo usuario (índice de un solo token vigente).
+    await authRepository.lockUser(user.id, { transaction });
+
+    const recent = await authRepository.countResetTokensSince(user.id, new Date(now.getTime() - HOUR_MS), { transaction });
+    if (recent >= PASSWORD_RESET_MAX_PER_HOUR) {
+      logger.warn('AUTH', 'forgot-password', 'USER_LIMIT', { userId: user.id, recent });
+      return;
+    }
+
+    await authRepository.invalidateActiveResetTokens(user.id, { transaction });
+    const resetToken = await authRepository.createResetToken(
+      {
+        userId: user.id,
+        tokenHash: hashToken(generateOpaqueToken()), // relleno: el token real se genera al enviar
+        expiresAt: new Date(now.getTime() + PASSWORD_RESET_TOKEN_TTL_MS),
+        requestedIp: context.ip ?? null,
+      },
+      { transaction }
+    );
+    await emailService.enqueueEmail(
+      { userId: user.id, toEmail: user.email, template: EMAIL_TEMPLATES.PASSWORD_RESET, passwordResetTokenId: resetToken.id },
+      { transaction }
+    );
+  });
+};
+
+/**
+ * Genera el token en claro de un correo PASSWORD_RESET en el momento de enviarlo: guarda su hash,
+ * fija la vigencia de 30 minutos desde ahora y devuelve el token para armar el enlace del correo.
+ * Lo usa el worker de correos (HU-106) y, mientras tanto, el comando de desarrollo
+ * `pnpm dev:reset-link`. Si el token ya se usó o fue invalidado devuelve null (no se envía).
+ * Cada llamada genera un token nuevo: un reintento de envío deja sin efecto el enlace anterior.
+ */
+export const prepareResetTokenForDelivery = async (passwordResetTokenId) =>
+  withTransaction(async (transaction) => {
+    const row = await authRepository.findResetTokenById(passwordResetTokenId, { transaction, lock: true });
+    if (!row || row.usedAt || row.invalidatedAt) return null;
+
+    const token = generateOpaqueToken();
+    const expiresAt = new Date(Date.now() + PASSWORD_RESET_TOKEN_TTL_MS);
+    await authRepository.updateResetToken(row.id, { tokenHash: hashToken(token), expiresAt }, { transaction });
+    return { token, expiresAt, userId: row.userId };
+  });
+
+const findActiveResetToken = async (rawToken, options) => {
+  const row = await authRepository.findResetTokenByHash(hashToken(rawToken), options);
+  if (!row || row.usedAt || row.invalidatedAt || new Date(row.expiresAt) <= new Date()) return null;
+  return row;
+};
+
+/** Para que la pantalla de restablecimiento sepa, antes de pedir la contraseña, si el enlace sirve. */
+export const validateResetToken = async (rawToken) => {
+  const row = await findActiveResetToken(rawToken);
+  if (!row) throw new AppError('AUTH_RESET_TOKEN_INVALID');
+  return { valid: true, expiresAt: new Date(row.expiresAt) };
+};
+
+/**
+ * Restablece la contraseña con el token del correo (uso único). Al terminar: marca el token como
+ * usado, revoca todas las sesiones, quita must_change_password, desbloquea la cuenta, registra
+ * PASSWORD_RESET_COMPLETED y encola PASSWORD_CHANGED. No inicia sesión: el usuario entra con su
+ * contraseña nueva.
+ */
+export const resetPassword = async ({ token, newPassword }, context = {}) => {
+  const issues = passwordPolicyIssues(newPassword);
+  if (issues.length) {
+    throw new AppError('AUTH_WEAK_PASSWORD', { details: issues.map((message) => fieldIssue('newPassword', message)) });
+  }
+  // El hash se calcula antes de abrir la transacción, para no retener el bloqueo durante bcrypt.
+  const passwordHash = await bcrypt.hash(newPassword, BCRYPT_COST);
+  const now = new Date();
+
+  const outcome = await withTransaction(async (transaction) => {
+    const row = await findActiveResetToken(token, { transaction, lock: true });
+    if (!row) return { error: 'AUTH_RESET_TOKEN_INVALID' };
+
+    const user = await authRepository.findUserWithPasswordById(row.userId, { transaction });
+    if (!user || !user.isActive) {
+      // El enlace de una cuenta desactivada se anula (y la anulación debe quedar guardada).
+      await authRepository.updateResetToken(row.id, { invalidatedAt: now }, { transaction });
+      return { error: 'AUTH_RESET_TOKEN_INVALID' };
+    }
+    if (await bcrypt.compare(newPassword, user.passwordHash)) {
+      // No se consume el token: el usuario puede intentar con otra contraseña.
+      return { error: 'SAME_PASSWORD' };
+    }
+
+    await authRepository.updateUser(
+      user.id,
+      { passwordHash, passwordChangedAt: now, mustChangePassword: false, failedLoginAttempts: 0, lockedUntil: null },
+      { transaction }
+    );
+    await authRepository.updateResetToken(row.id, { usedAt: now }, { transaction });
+    await authRepository.revokeAllRefreshTokens(user.id, { transaction });
+    await authRepository.createAuthEvent(
+      { userId: user.id, usernameAttempted: user.username, eventType: AUTH_EVENT_TYPES.PASSWORD_RESET_COMPLETED, ...eventContext(context) },
+      { transaction }
+    );
+    await emailService.enqueueEmail(
+      { userId: user.id, toEmail: user.email, template: EMAIL_TEMPLATES.PASSWORD_CHANGED },
+      { transaction }
+    );
+    return { userId: user.id };
+  });
+
+  if (outcome.error === 'SAME_PASSWORD') {
+    const message = 'La contraseña nueva debe ser distinta de la actual';
+    throw new AppError('AUTH_WEAK_PASSWORD', { message, details: [fieldIssue('newPassword', message)] });
+  }
+  if (outcome.error) throw new AppError(outcome.error);
 };
 
 /**

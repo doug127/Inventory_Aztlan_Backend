@@ -1,6 +1,13 @@
 import { rateLimit } from 'express-rate-limit';
 import { AppError } from '../errors/AppError.js';
-import { LOGIN_RATE_LIMIT_DEFAULT, LOGIN_RATE_LIMIT_WINDOW_MS } from '../constants/auth.js';
+import {
+  FORGOT_PASSWORD_RATE_LIMIT_DEFAULT,
+  FORGOT_PASSWORD_RATE_LIMIT_WINDOW_MS,
+  LOGIN_RATE_LIMIT_DEFAULT,
+  LOGIN_RATE_LIMIT_WINDOW_MS,
+  RESET_PASSWORD_RATE_LIMIT_DEFAULT,
+  RESET_PASSWORD_RATE_LIMIT_WINDOW_MS,
+} from '../constants/auth.js';
 
 /**
  * Limitador por IP que responde con el sobre estándar (AUTH_RATE_LIMITED, 429) a través del
@@ -32,5 +39,20 @@ export const loginRateLimiter = createRateLimiter({
   windowMs: LOGIN_RATE_LIMIT_WINDOW_MS,
   limit: Number(process.env.LOGIN_RATE_LIMIT_PER_MINUTE) || LOGIN_RATE_LIMIT_DEFAULT,
   message: 'Demasiados intentos de inicio de sesión desde este equipo. Espere un minuto.',
+  skipSuccessfulRequests: true,
+});
+
+/** Olvidé mi contraseña: 3 solicitudes por hora por IP (business_rules.md §9.5.4). Cuentan todas. */
+export const forgotPasswordRateLimiter = createRateLimiter({
+  windowMs: FORGOT_PASSWORD_RATE_LIMIT_WINDOW_MS,
+  limit: Number(process.env.FORGOT_PASSWORD_RATE_LIMIT_PER_HOUR) || FORGOT_PASSWORD_RATE_LIMIT_DEFAULT,
+  message: 'Demasiadas solicitudes de recuperación desde este equipo. Intente de nuevo en una hora.',
+});
+
+/** Restablecer contraseña: 10 intentos fallidos cada 15 minutos por IP, contra quien prueba tokens. */
+export const resetPasswordRateLimiter = createRateLimiter({
+  windowMs: RESET_PASSWORD_RATE_LIMIT_WINDOW_MS,
+  limit: Number(process.env.RESET_PASSWORD_RATE_LIMIT_PER_15_MIN) || RESET_PASSWORD_RATE_LIMIT_DEFAULT,
+  message: 'Demasiados intentos de restablecimiento desde este equipo. Espere unos minutos.',
   skipSuccessfulRequests: true,
 });

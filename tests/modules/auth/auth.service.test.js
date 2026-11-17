@@ -14,6 +14,14 @@ vi.mock('#src/modules/auth/auth.repository.js', () => ({
   findRefreshTokenByHash: vi.fn(),
   revokeRefreshToken: vi.fn(),
   revokeAllRefreshTokens: vi.fn(),
+  findUserByEmail: vi.fn(),
+  lockUser: vi.fn(),
+  countResetTokensSince: vi.fn(),
+  invalidateActiveResetTokens: vi.fn(),
+  createResetToken: vi.fn(),
+  findResetTokenByHash: vi.fn(),
+  findResetTokenById: vi.fn(),
+  updateResetToken: vi.fn(),
 }));
 vi.mock('#src/shared/db/transaction.js', () => ({ withTransaction: (fn) => fn('tx') }));
 vi.mock('#src/modules/email/email.service.js', () => ({ enqueueEmail: vi.fn() }));
@@ -21,9 +29,10 @@ vi.mock('#src/modules/email/email.service.js', () => ({ enqueueEmail: vi.fn() })
 const authRepository = await import('#src/modules/auth/auth.repository.js');
 const emailService = await import('#src/modules/email/email.service.js');
 const { hashToken } = await import('#src/modules/auth/token.service.js');
-const { login, refreshSession, resolveSessionUser, getCurrentUser, logout, changePassword } = await import(
-  '#src/modules/auth/auth.service.js'
-);
+const {
+  login, refreshSession, resolveSessionUser, getCurrentUser, logout, changePassword,
+  requestPasswordReset, prepareResetTokenForDelivery, validateResetToken, resetPassword,
+} = await import('#src/modules/auth/auth.service.js');
 
 const PASSWORD = 'Clave-Correcta-9';
 const DAY = 24 * 60 * 60 * 1000;
@@ -381,6 +390,153 @@ describe('changePassword (HU-104)', () => {
     const error = await changePassword(actor, { currentPassword: PASSWORD, newPassword: PASSWORD }).catch((e) => e);
     expect(error).toMatchObject({ code: 'AUTH_WEAK_PASSWORD', message: 'La contraseña nueva debe ser distinta de la actual' });
     expect(authRepository.updateUser).not.toHaveBeenCalled();
+  });
+});
+
+describe('recuperación de contraseña (HU-105)', () => {
+  const resetRow = (overrides = {}) => ({
+    id: '9',
+    userId: 7,
+    tokenHash: hashToken('token-recuperacion-valido'),
+    expiresAt: new Date(Date.now() + 20 * 60 * 1000),
+    usedAt: null,
+    invalidatedAt: null,
+    ...overrides,
+  });
+
+  beforeEach(() => {
+    authRepository.countResetTokensSince.mockResolvedValue(0);
+    authRepository.createResetToken.mockImplementation(async (data) => ({ id: '9', ...data }));
+  });
+
+  describe('requestPasswordReset', () => {
+    it('correo inexistente: registra el evento y no crea token ni correo', async () => {
+      authRepository.findUserByEmail.mockResolvedValue(null);
+      await requestPasswordReset({ email: 'nadie@aztlan.test' });
+      expect(authRepository.createAuthEvent).toHaveBeenCalledWith(
+        expect.objectContaining({ userId: null, usernameAttempted: 'nadie@aztlan.test', eventType: 'PASSWORD_RESET_REQUESTED' })
+      );
+      expect(authRepository.createResetToken).not.toHaveBeenCalled();
+      expect(emailService.enqueueEmail).not.toHaveBeenCalled();
+    });
+
+    it('usuario inactivo: no recibe correo', async () => {
+      authRepository.findUserByEmail.mockResolvedValue(userRow({ isActive: false }));
+      await requestPasswordReset({ email: 'pedro@aztlan.test' });
+      expect(emailService.enqueueEmail).not.toHaveBeenCalled();
+    });
+
+    it('usuario activo: invalida el token anterior, crea uno de 30 min (solo hash) y encola PASSWORD_RESET', async () => {
+      authRepository.findUserByEmail.mockResolvedValue(userRow());
+      await requestPasswordReset({ email: 'pedro@aztlan.test' }, { ip: '10.0.0.5' });
+
+      expect(authRepository.lockUser).toHaveBeenCalledWith(7, { transaction: 'tx' });
+      expect(authRepository.invalidateActiveResetTokens).toHaveBeenCalledWith(7, { transaction: 'tx' });
+      const created = authRepository.createResetToken.mock.calls[0][0];
+      expect(created).toMatchObject({ userId: 7, requestedIp: '10.0.0.5' });
+      expect(created.tokenHash).toMatch(/^[0-9a-f]{64}$/);
+      const ttl = created.expiresAt.getTime() - Date.now();
+      expect(ttl).toBeGreaterThan(29 * 60 * 1000);
+      expect(emailService.enqueueEmail).toHaveBeenCalledWith(
+        { userId: 7, toEmail: 'pedro@aztlan.test', template: 'PASSWORD_RESET', passwordResetTokenId: '9' }, { transaction: 'tx' }
+      );
+    });
+
+    it('con 3 solicitudes en la última hora no crea otra (sin revelarlo)', async () => {
+      authRepository.findUserByEmail.mockResolvedValue(userRow());
+      authRepository.countResetTokensSince.mockResolvedValue(3);
+      await expect(requestPasswordReset({ email: 'pedro@aztlan.test' })).resolves.toBeUndefined();
+      expect(authRepository.createResetToken).not.toHaveBeenCalled();
+      expect(emailService.enqueueEmail).not.toHaveBeenCalled();
+    });
+  });
+
+  describe('prepareResetTokenForDelivery', () => {
+    it('genera el token en claro, guarda solo su hash y renueva los 30 minutos', async () => {
+      authRepository.findResetTokenById.mockResolvedValue(resetRow());
+      const prepared = await prepareResetTokenForDelivery('9');
+
+      expect(prepared.token).toMatch(/^[A-Za-z0-9_-]{43}$/);
+      const [id, changes] = authRepository.updateResetToken.mock.calls[0];
+      expect(id).toBe('9');
+      expect(changes.tokenHash).toBe(hashToken(prepared.token));
+      expect(changes.expiresAt.getTime() - Date.now()).toBeGreaterThan(29 * 60 * 1000);
+    });
+
+    it('token usado o invalidado: devuelve null', async () => {
+      authRepository.findResetTokenById.mockResolvedValue(resetRow({ usedAt: new Date() }));
+      expect(await prepareResetTokenForDelivery('9')).toBeNull();
+      authRepository.findResetTokenById.mockResolvedValue(resetRow({ invalidatedAt: new Date() }));
+      expect(await prepareResetTokenForDelivery('9')).toBeNull();
+      expect(authRepository.updateResetToken).not.toHaveBeenCalled();
+    });
+  });
+
+  describe('validateResetToken', () => {
+    it.each([
+      ['inexistente', null],
+      ['vencido', resetRow({ expiresAt: new Date(Date.now() - 1000) })],
+      ['usado', resetRow({ usedAt: new Date() })],
+      ['invalidado', resetRow({ invalidatedAt: new Date() })],
+    ])('token %s: AUTH_RESET_TOKEN_INVALID', async (_label, row) => {
+      authRepository.findResetTokenByHash.mockResolvedValue(row);
+      await expectAppError(validateResetToken('token-recuperacion-valido'), 'AUTH_RESET_TOKEN_INVALID');
+    });
+
+    it('token vigente: { valid: true }', async () => {
+      authRepository.findResetTokenByHash.mockResolvedValue(resetRow());
+      await expect(validateResetToken('token-recuperacion-valido')).resolves.toMatchObject({ valid: true });
+    });
+  });
+
+  describe('resetPassword', () => {
+    const NEW = 'Recuperada-2026';
+
+    it('contraseña débil: AUTH_WEAK_PASSWORD sin tocar el token', async () => {
+      await expectAppError(resetPassword({ token: 'x'.repeat(43), newPassword: 'debil' }), 'AUTH_WEAK_PASSWORD');
+      expect(authRepository.findResetTokenByHash).not.toHaveBeenCalled();
+    });
+
+    it('token inválido: AUTH_RESET_TOKEN_INVALID', async () => {
+      authRepository.findResetTokenByHash.mockResolvedValue(null);
+      await expectAppError(resetPassword({ token: 'x'.repeat(43), newPassword: NEW }), 'AUTH_RESET_TOKEN_INVALID');
+      expect(authRepository.updateUser).not.toHaveBeenCalled();
+    });
+
+    it('éxito: cambia la contraseña, consume el token, revoca sesiones, desbloquea, evento y correo', async () => {
+      authRepository.findResetTokenByHash.mockResolvedValue(resetRow());
+      authRepository.findUserWithPasswordById.mockResolvedValue(userRow({ mustChangePassword: true, lockedUntil: new Date(Date.now() + 60_000) }));
+
+      await resetPassword({ token: 'token-recuperacion-valido', newPassword: NEW }, { ip: '10.0.0.5' });
+
+      expect(authRepository.findResetTokenByHash).toHaveBeenCalledWith(hashToken('token-recuperacion-valido'), { transaction: 'tx', lock: true });
+      const [, changes] = authRepository.updateUser.mock.calls[0];
+      expect(changes).toMatchObject({ mustChangePassword: false, failedLoginAttempts: 0, lockedUntil: null });
+      expect(await bcrypt.compare(NEW, changes.passwordHash)).toBe(true);
+      expect(authRepository.updateResetToken).toHaveBeenCalledWith('9', { usedAt: expect.any(Date) }, { transaction: 'tx' });
+      expect(authRepository.revokeAllRefreshTokens).toHaveBeenCalledWith(7, { transaction: 'tx' });
+      expect(authRepository.createAuthEvent).toHaveBeenCalledWith(
+        expect.objectContaining({ eventType: 'PASSWORD_RESET_COMPLETED', userId: 7 }), { transaction: 'tx' }
+      );
+      expect(emailService.enqueueEmail).toHaveBeenCalledWith(
+        { userId: 7, toEmail: 'pedro@aztlan.test', template: 'PASSWORD_CHANGED' }, { transaction: 'tx' }
+      );
+    });
+
+    it('contraseña igual a la actual: AUTH_WEAK_PASSWORD y el token no se consume', async () => {
+      authRepository.findResetTokenByHash.mockResolvedValue(resetRow());
+      authRepository.findUserWithPasswordById.mockResolvedValue(userRow());
+      await expectAppError(resetPassword({ token: 'token-recuperacion-valido', newPassword: PASSWORD }), 'AUTH_WEAK_PASSWORD');
+      expect(authRepository.updateResetToken).not.toHaveBeenCalled();
+    });
+
+    it('usuario desactivado: anula el token y responde AUTH_RESET_TOKEN_INVALID', async () => {
+      authRepository.findResetTokenByHash.mockResolvedValue(resetRow());
+      authRepository.findUserWithPasswordById.mockResolvedValue(userRow({ isActive: false }));
+      await expectAppError(resetPassword({ token: 'token-recuperacion-valido', newPassword: NEW }), 'AUTH_RESET_TOKEN_INVALID');
+      expect(authRepository.updateResetToken).toHaveBeenCalledWith('9', { invalidatedAt: expect.any(Date) }, { transaction: 'tx' });
+      expect(authRepository.updateUser).not.toHaveBeenCalled();
+    });
   });
 });
 

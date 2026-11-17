@@ -28,5 +28,13 @@ export const ACCOUNT_LOCK_MS = 15 * 60 * 1000;
 export const LOGIN_RATE_LIMIT_WINDOW_MS = 60 * 1000;
 export const LOGIN_RATE_LIMIT_DEFAULT = 10;
 
+// business_rules.md §9.5: recuperación de contraseña.
+export const PASSWORD_RESET_TOKEN_TTL_MS = 30 * 60 * 1000;
+export const PASSWORD_RESET_MAX_PER_HOUR = 3; // por usuario
+export const FORGOT_PASSWORD_RATE_LIMIT_WINDOW_MS = 60 * 60 * 1000;
+export const FORGOT_PASSWORD_RATE_LIMIT_DEFAULT = 3; // por IP
+export const RESET_PASSWORD_RATE_LIMIT_WINDOW_MS = 15 * 60 * 1000;
+export const RESET_PASSWORD_RATE_LIMIT_DEFAULT = 10; // intentos fallidos por IP
+
 // business_rules.md §9.2: bcrypt con costo >= 10.
 export const BCRYPT_COST = 12;

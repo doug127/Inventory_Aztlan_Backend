@@ -16,6 +16,7 @@ import {MovementTarget} from './MovementTarget.js';
 import {AuthEvent} from './AuthEvent.js';
 import {RefreshToken} from './RefreshToken.js';
 import {EmailOutbox} from './EmailOutbox.js';
+import {PasswordResetToken} from './PasswordResetToken.js';
 
 // * Seguridad y autenticación (esquema nuevo, atributos camelCase)
 Role.hasMany(User, { foreignKey: 'roleId', as: 'users' });
@@ -27,6 +28,9 @@ RefreshToken.belongsTo(User, { foreignKey: 'userId', as: 'user' });
 RefreshToken.belongsTo(RefreshToken, { foreignKey: 'replacedByTokenId', as: 'replacedBy' });
 User.hasMany(EmailOutbox, { foreignKey: 'userId', as: 'emails' });
 EmailOutbox.belongsTo(User, { foreignKey: 'userId', as: 'user' });
+User.hasMany(PasswordResetToken, { foreignKey: 'userId', as: 'passwordResetTokens' });
+PasswordResetToken.belongsTo(User, { foreignKey: 'userId', as: 'user' });
+EmailOutbox.belongsTo(PasswordResetToken, { foreignKey: 'passwordResetTokenId', as: 'passwordResetToken' });
 
 // * Relación uno a muchos entre CategoryProduct y Product
 CategoryProduct.hasMany(Product, { foreignKey: 'product_category_id' });
@@ -131,5 +135,6 @@ export {
   MovementTarget,
   AuthEvent,
   RefreshToken,
-  EmailOutbox
+  EmailOutbox,
+  PasswordResetToken
 };

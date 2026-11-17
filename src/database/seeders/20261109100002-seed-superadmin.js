@@ -10,7 +10,7 @@ import { BCRYPT_COST } from '../../shared/constants/auth.js';
 const USERNAME = 'superadmin';
 
 export const up = async (queryInterface) => {
-  const email = (process.env.SEED_SUPERADMIN_EMAIL || 'superadmin@aztlan.local').toLowerCase();
+  const email = (process.env.SEED_SUPERADMIN_EMAIL || 'doutarazona09@gmail.com').toLowerCase();
   const password = process.env.SEED_SUPERADMIN_PASSWORD;
 
   if (!password) {

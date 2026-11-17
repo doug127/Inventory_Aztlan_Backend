@@ -11,6 +11,7 @@ import reasonRoutes from '#src/modules/movement/reason/reason.route.js';
 import movementRoutes from '#src/modules/movement/movement.route.js';
 import assetTypeRouter from '#src/modules/asset/asset_type/asset_type.route.js';
 import assetRouter from '#src/modules/asset/asset.route.js';
+import devRoutes from '#src/modules/dev/dev.route.js';
 
 const routes = Router();
 
@@ -26,5 +27,7 @@ routes.use('/movement-types', movementTypes);
 routes.use('/reasons', reasonRoutes);
 routes.use('/asset-types', assetTypeRouter);
 routes.use('/assets', assetRouter);
+// Solo desarrollo (NODE_ENV != production, ENABLE_DEV_TOOLS=true y desde localhost); si no, 404.
+routes.use('/dev', devRoutes);
 
 export default routes;
