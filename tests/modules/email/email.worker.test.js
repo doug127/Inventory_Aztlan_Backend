@@ -8,7 +8,10 @@ vi.mock('#src/modules/email/email.repository.js', () => ({
   markFailed: vi.fn(),
   findRecipient: vi.fn(),
 }));
-vi.mock('#src/modules/auth/auth.service.js', () => ({ prepareResetTokenForDelivery: vi.fn() }));
+vi.mock('#src/modules/auth/auth.service.js', () => ({
+  prepareResetTokenForDelivery: vi.fn(),
+  prepareWelcomeForDelivery: vi.fn(),
+}));
 
 const repo = await import('#src/modules/email/email.repository.js');
 const auth = await import('#src/modules/auth/auth.service.js');
@@ -98,6 +101,31 @@ describe('processEmailBatch', () => {
     const result = await processEmailBatch({ transport, config, now });
 
     expect(result.failed).toBe(1);
+    expect(transport.sendMail).not.toHaveBeenCalled();
+    expect(repo.markFailed).toHaveBeenCalledWith('1', { lastError: expect.stringMatching(/Cancelado/) });
+  });
+
+  it('WELCOME: genera la contraseña temporal al enviar y la pone en el correo', async () => {
+    repo.claimDueEmails.mockResolvedValue([email({ template: 'WELCOME' })]);
+    auth.prepareWelcomeForDelivery.mockResolvedValue({ temporaryPassword: 'Temp4567Abcd' });
+    const transport = okTransport();
+
+    await processEmailBatch({ transport, config, now });
+
+    expect(auth.prepareWelcomeForDelivery).toHaveBeenCalledWith(7);
+    const message = transport.sendMail.mock.calls[0][0];
+    expect(message.subject).toBe('Bienvenido a Inventario Aztlan');
+    expect(message.text).toContain('Contraseña temporal: Temp4567Abcd');
+    expect(message.text).toContain('Usuario: pedro.gomez');
+    expect(repo.markSent).toHaveBeenCalled();
+  });
+
+  it('WELCOME de un usuario que ya ingresó o fue desactivado: no se envía y queda FAILED', async () => {
+    repo.claimDueEmails.mockResolvedValue([email({ template: 'WELCOME' })]);
+    auth.prepareWelcomeForDelivery.mockResolvedValue(null);
+    const transport = okTransport();
+
+    expect((await processEmailBatch({ transport, config, now })).failed).toBe(1);
     expect(transport.sendMail).not.toHaveBeenCalled();
     expect(repo.markFailed).toHaveBeenCalledWith('1', { lastError: expect.stringMatching(/Cancelado/) });
   });

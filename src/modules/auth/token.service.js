@@ -1,4 +1,4 @@
-import { createHash, randomBytes } from 'node:crypto';
+import { createHash, randomBytes, randomInt } from 'node:crypto';
 import jwt from 'jsonwebtoken';
 import { AppError } from '#src/shared/errors/AppError.js';
 import { ACCESS_TOKEN_TTL_SECONDS } from '#src/shared/constants/auth.js';
@@ -7,6 +7,28 @@ const ALGORITHM = 'HS256';
 
 /** Token opaco de 32 bytes aleatorios (refresh y recuperación de contraseña). */
 export const generateOpaqueToken = () => randomBytes(32).toString('base64url');
+
+// Sin caracteres que se confunden al leerlos en un correo (I, l, O, 0, 1).
+const TEMP_UPPER = 'ABCDEFGHJKLMNPQRSTUVWXYZ';
+const TEMP_LOWER = 'abcdefghijkmnpqrstuvwxyz';
+const TEMP_DIGIT = '23456789';
+const pick = (alphabet) => alphabet[randomInt(alphabet.length)];
+
+/**
+ * Contraseña temporal aleatoria que cumple la política (business_rules.md §9.2.1): al menos una
+ * mayúscula, una minúscula y un número. 12 caracteres de un alfabeto de 56 ≈ 69 bits.
+ */
+export const generateTemporaryPassword = (length = 12) => {
+  const all = TEMP_UPPER + TEMP_LOWER + TEMP_DIGIT;
+  const chars = [pick(TEMP_UPPER), pick(TEMP_LOWER), pick(TEMP_DIGIT)];
+  while (chars.length < length) chars.push(pick(all));
+  // Fisher–Yates con randomInt, para que los caracteres obligatorios no queden siempre al inicio.
+  for (let i = chars.length - 1; i > 0; i -= 1) {
+    const j = randomInt(i + 1);
+    [chars[i], chars[j]] = [chars[j], chars[i]];
+  }
+  return chars.join('');
+};
 
 /** SHA-256 en hex: es lo único que se guarda en la BD. */
 export const hashToken = (token) => createHash('sha256').update(token).digest('hex');

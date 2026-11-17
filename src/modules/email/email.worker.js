@@ -6,7 +6,7 @@
 // pierde mensajes: quedan en la cola hasta que se puedan enviar.
 import { EMAIL_TEMPLATES, EMAIL_WORKER_DEFAULTS } from '#src/shared/constants/email.js';
 import { logger, maskEmail } from '#src/shared/logging/logger.js';
-import { prepareResetTokenForDelivery } from '#src/modules/auth/auth.service.js';
+import { prepareResetTokenForDelivery, prepareWelcomeForDelivery } from '#src/modules/auth/auth.service.js';
 import * as emailRepository from './email.repository.js';
 import { renderEmail } from './email.templates.js';
 import { createMailTransport, mailFrom } from './email.transport.js';
@@ -41,6 +41,12 @@ const buildContext = async (email) => {
     const prepared = email.passwordResetTokenId ? await prepareResetTokenForDelivery(email.passwordResetTokenId) : null;
     if (!prepared) throw new SkipEmail('Cancelado: el token de recuperación ya se usó o fue reemplazado');
     return { ...context, resetLink: resetLink(prepared.token), expiresAt: prepared.expiresAt };
+  }
+  if (email.template === EMAIL_TEMPLATES.WELCOME) {
+    // HU-107: la contraseña temporal se genera aquí, igual que el token de recuperación.
+    const prepared = await prepareWelcomeForDelivery(email.userId);
+    if (!prepared) throw new SkipEmail('Cancelado: el usuario ya no está pendiente de su primer ingreso o fue desactivado');
+    return { ...context, temporaryPassword: prepared.temporaryPassword };
   }
   return context;
 };

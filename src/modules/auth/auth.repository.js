@@ -35,6 +35,16 @@ export const findLoginStateForUpdate = async (id, { transaction } = {}) =>
     })
   );
 
+/** Estado de la cuenta con la fila bloqueada (FOR UPDATE), para las acciones de soporte. */
+export const findAccountStateForUpdate = async (id, { transaction } = {}) =>
+  plain(
+    await User.findByPk(id, {
+      attributes: ['id', 'username', 'email', 'isActive', 'mustChangePassword', 'lastLoginAt', 'failedLoginAttempts', 'lockedUntil'],
+      transaction,
+      lock: Transaction.LOCK.UPDATE,
+    })
+  );
+
 export const updateUser = async (id, changes, { transaction } = {}) => {
   await User.update(changes, { where: { id }, transaction });
 };

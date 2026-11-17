@@ -16,7 +16,7 @@ import { EMAIL_TEMPLATES } from '#src/shared/constants/email.js';
 import { passwordPolicyIssues } from '#src/shared/schemas/password.js';
 import * as emailService from '#src/modules/email/email.service.js';
 import * as authRepository from './auth.repository.js';
-import { generateOpaqueToken, hashToken, signAccessToken } from './token.service.js';
+import { generateOpaqueToken, generateTemporaryPassword, hashToken, signAccessToken } from './token.service.js';
 import { toAuthUserDto, toSessionUser } from './auth.dto.js';
 
 // Hash ficticio para comparar cuando el usuario no existe: así el tiempo de respuesta es el mismo
@@ -346,21 +346,32 @@ export const requestPasswordReset = async ({ email }, context = {}) => {
       return;
     }
 
-    await authRepository.invalidateActiveResetTokens(user.id, { transaction });
-    const resetToken = await authRepository.createResetToken(
-      {
-        userId: user.id,
-        tokenHash: hashToken(generateOpaqueToken()), // relleno: el token real se genera al enviar
-        expiresAt: new Date(now.getTime() + PASSWORD_RESET_TOKEN_TTL_MS),
-        requestedIp: context.ip ?? null,
-      },
-      { transaction }
-    );
-    await emailService.enqueueEmail(
-      { userId: user.id, toEmail: user.email, template: EMAIL_TEMPLATES.PASSWORD_RESET, passwordResetTokenId: resetToken.id },
-      { transaction }
-    );
+    await issuePasswordResetEmail(user, { requestedIp: context.ip, now }, { transaction });
   });
+};
+
+/**
+ * Invalida el token vigente del usuario, crea uno nuevo (con hash de relleno: el token real se
+ * genera al enviar) y encola el correo PASSWORD_RESET enlazado. Debe llamarse dentro de una
+ * transacción que ya bloqueó la fila del usuario. La usan la solicitud del propio usuario y el
+ * restablecimiento forzado por un administrador (HU-108).
+ */
+const issuePasswordResetEmail = async (user, { requestedIp = null, now = new Date() }, { transaction }) => {
+  await authRepository.invalidateActiveResetTokens(user.id, { transaction });
+  const resetToken = await authRepository.createResetToken(
+    {
+      userId: user.id,
+      tokenHash: hashToken(generateOpaqueToken()),
+      expiresAt: new Date(now.getTime() + PASSWORD_RESET_TOKEN_TTL_MS),
+      requestedIp,
+    },
+    { transaction }
+  );
+  await emailService.enqueueEmail(
+    { userId: user.id, toEmail: user.email, template: EMAIL_TEMPLATES.PASSWORD_RESET, passwordResetTokenId: resetToken.id },
+    { transaction }
+  );
+  return resetToken;
 };
 
 /**
@@ -447,6 +458,99 @@ export const resetPassword = async ({ token, newPassword }, context = {}) => {
     throw new AppError('AUTH_WEAK_PASSWORD', { message, details: [fieldIssue('newPassword', message)] });
   }
   if (outcome.error) throw new AppError(outcome.error);
+};
+
+// --- Soporte de cuentas para la gestión de usuarios (HU-107, HU-108) ---------
+//
+// Aquí vive todo lo que toca contraseñas, sesiones y tokens; el service de usuarios decide QUIÉN
+// puede hacerlo (jerarquía) y llama a estas funciones.
+
+/** Hash de una contraseña aleatoria que nadie conoce: la cuenta no admite login hasta fijar otra. */
+export const unusablePasswordHash = () => bcrypt.hash(generateOpaqueToken(), BCRYPT_COST);
+
+/**
+ * Genera la contraseña temporal del correo WELCOME en el momento de enviarlo (igual que el token
+ * de recuperación): solo queda su hash en la BD y el texto viaja únicamente en el correo.
+ * Devuelve null si ya no tiene sentido enviarla: usuario inexistente o inactivo, o que ya fijó
+ * su propia contraseña o ya inició sesión. Cada llamada genera una contraseña nueva: un reintento
+ * de envío deja sin efecto la anterior.
+ */
+export const prepareWelcomeForDelivery = async (userId) => {
+  // Se calcula antes de abrir la transacción, para no retener el bloqueo durante bcrypt.
+  const temporaryPassword = generateTemporaryPassword();
+  const passwordHash = await bcrypt.hash(temporaryPassword, BCRYPT_COST);
+
+  return withTransaction(async (transaction) => {
+    const user = await authRepository.findAccountStateForUpdate(userId, { transaction });
+    if (!user || !user.isActive || !user.mustChangePassword || user.lastLoginAt) return null;
+    await authRepository.updateUser(user.id, { passwordHash, passwordChangedAt: new Date() }, { transaction });
+    return { temporaryPassword };
+  });
+};
+
+/**
+ * HU-108: restablecimiento forzado por un administrador. La contraseña actual deja de servir de
+ * inmediato (se reemplaza por una desconocida), se cierran todas las sesiones (los access tokens
+ * caen por password_changed_at) y el usuario recibe el correo PASSWORD_RESET para fijar una nueva.
+ * Devuelve null si el usuario no existe o está inactivo.
+ */
+export const forcePasswordReset = async (userId, context = {}) => {
+  const passwordHash = await unusablePasswordHash();
+  const now = new Date();
+  // El iat del JWT va en segundos y resolveSessionUser rechaza iat < password_changed_at (en
+  // segundos). Con la hora exacta, un access token emitido en este mismo segundo seguiría sirviendo
+  // hasta 15 minutos; al segundo siguiente, ningún token anterior al restablecimiento pasa.
+  // Nadie puede iniciar sesión hasta fijar la contraseña nueva, que vuelve a fijar la fecha.
+  const passwordChangedAt = new Date((Math.floor(now.getTime() / 1000) + 1) * 1000);
+
+  return withTransaction(async (transaction) => {
+    const user = await authRepository.findAccountStateForUpdate(userId, { transaction });
+    if (!user || !user.isActive) return null;
+
+    await authRepository.updateUser(user.id, { passwordHash, passwordChangedAt }, { transaction });
+    const revokedSessions = await authRepository.revokeAllRefreshTokens(user.id, { transaction });
+    const resetToken = await issuePasswordResetEmail(user, { requestedIp: context.ip, now }, { transaction });
+    await authRepository.createAuthEvent(
+      { userId: user.id, usernameAttempted: user.username, eventType: AUTH_EVENT_TYPES.PASSWORD_RESET_REQUESTED, ...eventContext(context) },
+      { transaction }
+    );
+    return { revokedSessions, expiresAt: new Date(resetToken.expiresAt) };
+  });
+};
+
+/**
+ * HU-108: desbloqueo manual. Reinicia el contador de intentos y quita el bloqueo. Solo registra
+ * ACCOUNT_UNLOCKED si la cuenta estaba bloqueada en ese momento. Devuelve { wasLocked } o null si
+ * el usuario no existe.
+ */
+export const unlockAccount = async (userId, context = {}) => {
+  const now = new Date();
+  return withTransaction(async (transaction) => {
+    const user = await authRepository.findAccountStateForUpdate(userId, { transaction });
+    if (!user) return null;
+
+    const wasLocked = isLocked(user, now);
+    if (!wasLocked && user.failedLoginAttempts === 0 && !user.lockedUntil) return { wasLocked };
+
+    await authRepository.updateUser(user.id, { failedLoginAttempts: 0, lockedUntil: null }, { transaction });
+    if (wasLocked) {
+      await authRepository.createAuthEvent(
+        { userId: user.id, usernameAttempted: user.username, eventType: AUTH_EVENT_TYPES.ACCOUNT_UNLOCKED, ...eventContext(context) },
+        { transaction }
+      );
+    }
+    return { wasLocked };
+  });
+};
+
+/**
+ * Al desactivar una cuenta: revoca sus sesiones y anula su enlace de recuperación vigente. Los
+ * access tokens ya emitidos caen en la siguiente petición (el middleware auth revisa is_active).
+ */
+export const revokeAccountAccess = async (userId, { transaction }) => {
+  const revokedSessions = await authRepository.revokeAllRefreshTokens(userId, { transaction });
+  await authRepository.invalidateActiveResetTokens(userId, { transaction });
+  return { revokedSessions };
 };
 
 /**

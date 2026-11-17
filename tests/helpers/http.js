@@ -45,6 +45,7 @@ export const startServer = async (app) => {
     baseUrl,
     get: (path, options) => request('GET', path, options),
     post: (path, options) => request('POST', path, options),
+    patch: (path, options) => request('PATCH', path, options),
     close: () => new Promise((resolve) => server.close(resolve)),
   };
 };

@@ -1,63 +1,51 @@
-import {
-    getAllUsersService,
-    getUserByIdService,
-    createUserService,
-    updateUserService,
-    deleteUserService
-} from './user.service.js';
+import * as userService from './user.service.js';
+import { addLogContext, sendCreated, sendOk, sendPaginated } from '#src/shared/http/response.js';
 
-export const getUsersController = async (req, res) => {
-    try {
-        const users = await getAllUsersService(req.user);
-        res.status(200).json(users);
-    } catch (error) {
-        res.status(500).json({ error: error.message });
-    }
-};
+// Sin try/catch: Express 5 lleva cualquier error de una función async al errorHandler.
 
-export const getUserByIdController = async (req, res) => {
-    try {
-        const user = await getUserByIdService(req.params.id);
-        res.status(200).json(user);
-    } catch (error) {
-        res.status(500).json({ error: error.message });
-    }
-};
+const requestContext = (req) => ({ ip: req.ip, userAgent: req.get('User-Agent') });
+
+const FORCE_RESET_MESSAGE =
+  'Se cerraron las sesiones del usuario y se le envió un correo para fijar una contraseña nueva. Su contraseña anterior ya no funciona.';
+
+export const listUsersController = async (req, res) =>
+  sendPaginated(res, await userService.listUsers(req.user, req.validated.query));
+
+export const listAssignableRolesController = async (req, res) =>
+  sendOk(res, await userService.listAssignableRoles(req.user));
+
+export const getUserController = async (req, res) =>
+  sendOk(res, await userService.getUser(req.user, req.validated.params.id));
 
 export const createUserController = async (req, res) => {
-    try {
-        const newUser = await createUserService({
-            data: req.validatedData,
-            currentUser: req.user
-        });
- 
-        res.status(201).json(newUser);
-    } catch (error) {
-        res.status(500).json({ error: error.message });
-    }
+  const user = await userService.createUser(req.user, req.validated.body);
+  addLogContext(res, { target: user.username, created: user.id, role: user.role.code });
+  return sendCreated(res, user);
 };
 
 export const updateUserController = async (req, res) => {
-    try {
-        const updatedUser = await updateUserService({
-            id: req.params.id,
-            data: req.validatedData,
-            currentUser: req.user
-        });
-        res.status(200).json(updatedUser);
-    } catch (error) {
-        res.status(500).json({ error: error.message });
-    }
+  addLogContext(res, { target: req.validated.params.id, fields: Object.keys(req.validated.body).join(',') });
+  return sendOk(res, await userService.updateUser(req.user, req.validated.params.id, req.validated.body));
 };
 
-export const deleteUserController = async (req, res) => {
-    try {
-        const userId = req.user.id;
-        
-        await deleteUserService(req.params.id, userId);
-        res.status(204).send();
-    } catch (error) {
-        res.status(500).json({ error: error.message });
-    }
+export const deactivateUserController = async (req, res) => {
+  addLogContext(res, { target: req.validated.params.id });
+  return sendOk(res, await userService.deactivateUser(req.user, req.validated.params.id));
 };
 
+export const activateUserController = async (req, res) => {
+  addLogContext(res, { target: req.validated.params.id });
+  return sendOk(res, await userService.activateUser(req.user, req.validated.params.id));
+};
+
+export const unlockUserController = async (req, res) => {
+  const result = await userService.unlockUser(req.user, req.validated.params.id, requestContext(req));
+  addLogContext(res, { target: result.user.username, wasLocked: result.wasLocked });
+  return sendOk(res, result);
+};
+
+export const forcePasswordResetController = async (req, res) => {
+  const result = await userService.forcePasswordReset(req.user, req.validated.params.id, requestContext(req));
+  addLogContext(res, { target: result.user.username, revokedSessions: result.revokedSessions });
+  return sendOk(res, { message: FORCE_RESET_MESSAGE, ...result }, { status: 202 });
+};
