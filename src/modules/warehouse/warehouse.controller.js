@@ -1,55 +1,33 @@
-import {
-    getAllWarehouses,
-    getWarehouseByName,
-    createWarehouse,
-    updateWarehouse,
-    deleteWarehouse
-} from './warehouse.service.js';
+import * as warehouseService from './warehouse.service.js';
+import { addLogContext, sendCreated, sendOk, sendPaginated } from '#src/shared/http/response.js';
 
-export const fetchAllWarehousesControllers = async (req, res) => {
-    try {
-        const warehouses = await getAllWarehouses();
-        res.status(200).json(warehouses);
-    } catch (error) {
-        res.status(400).json({ message: error.message });
-    }
-};
+// Sin try/catch: Express 5 lleva cualquier error de una función async al errorHandler.
 
-export const fetchWarehouseByNameController = async (req, res) => {
-    try {
-        const { name } = req.params;
-        const warehouse = await getWarehouseByName(name);
-        res.status(200).json(warehouse);
-    } catch (error) {
-        res.status(400).json({ message: error.message });
-    }
-};
+export const listWarehousesController = async (req, res) =>
+  sendPaginated(res, await warehouseService.listWarehouses(req.validated.query));
+
+export const getWarehouseController = async (req, res) =>
+  sendOk(res, await warehouseService.getWarehouse(req.validated.params.id));
 
 export const createWarehouseController = async (req, res) => {
-    try {
-        const warehouse = await createWarehouse({ data: req.body, currentUser: req.user });
-        res.status(201).json(warehouse);
-    } catch (error) {
-        res.status(400).json({ message: error.message });
-    }   
+  const warehouse = await warehouseService.createWarehouse(req.validated.body);
+  addLogContext(res, { created: warehouse.code });
+  return sendCreated(res, warehouse);
 };
 
 export const updateWarehouseController = async (req, res) => {
-    try {
-        const { id } = req.params;
-        const warehouse = await updateWarehouse(id, { data: req.body, currentUser: req.user });
-        res.status(200).json(warehouse);
-    } catch (error) {
-        res.status(400).json({ message: error.message });
-    }
+  addLogContext(res, { target: req.validated.params.id, fields: Object.keys(req.validated.body).join(',') });
+  return sendOk(res, await warehouseService.updateWarehouse(req.validated.params.id, req.validated.body));
 };
 
-export const deleteWarehouseController = async (req, res) => {
-    try {
-        const { id } = req.params;
-        await deleteWarehouse(id, { currentUser: req.user });
-        res.status(200).json({ message: 'Almacen eliminado exitosamente' });
-    } catch (error) {
-        res.status(400).json({ message: error.message });
-    }
+export const deactivateWarehouseController = async (req, res) => {
+  const warehouse = await warehouseService.deactivateWarehouse(req.validated.params.id);
+  addLogContext(res, { target: warehouse.code });
+  return sendOk(res, warehouse);
+};
+
+export const activateWarehouseController = async (req, res) => {
+  const warehouse = await warehouseService.activateWarehouse(req.validated.params.id);
+  addLogContext(res, { target: warehouse.code });
+  return sendOk(res, warehouse);
 };

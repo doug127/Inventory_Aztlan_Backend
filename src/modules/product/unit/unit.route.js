@@ -1,26 +1,34 @@
-import Router from 'express';
+import { Router } from 'express';
 import { auth } from '#src/shared/middlewares/auth.middleware.js';
 import { authorizeRole } from '#src/shared/middlewares/authorize.middleware.js';
 import { validate } from '#src/shared/middlewares/validate.middleware.js';
+import { ROLE_CODES } from '#src/shared/constants/roles.js';
+import { ConvertQuerySchema, CreateUnitSchema, ListUnitsQuerySchema, UnitIdParamsSchema, UpdateUnitSchema } from './unit.schema.js';
 import {
-    getAllUnitsController,
-    getUnitByIdController,
-    getBaseUnitsController,
-    createUnitController,
-    updateUnitController,
-    deleteUnitController    
+  activateUnitController,
+  convertController,
+  createUnitController,
+  deactivateUnitController,
+  getUnitController,
+  listUnitsController,
+  updateUnitController,
 } from './unit.controller.js';
-import { UnitSchema } from './unit.schema.js';
-import { ROLE_NAMES } from '#src/shared/constants/ROLE_NAMES.js';
-
 
 const router = Router();
+const byId = { params: UnitIdParamsSchema };
+const admin = authorizeRole(ROLE_CODES.ADMIN);
 
-router.get('/', auth, authorizeRole(ROLE_NAMES.USER), getAllUnitsController);
-router.get('/base-units', auth, authorizeRole(ROLE_NAMES.USER), getBaseUnitsController);
-router.get('/:id', auth, authorizeRole(ROLE_NAMES.USER), getUnitByIdController);
-router.post('/create', auth, authorizeRole(ROLE_NAMES.ADMIN), validate(UnitSchema), createUnitController);
-router.put('/update/:id', auth, authorizeRole(ROLE_NAMES.ADMIN), validate(UnitSchema), updateUnitController);
-router.delete('/destroy/:id', auth, authorizeRole(ROLE_NAMES.SUPERADMIN), deleteUnitController);
+// HU-202. Consultar y convertir: todos los roles. Crear, editar y desactivar: ADMIN o superior.
+// No hay borrado: las unidades se desactivan (los productos las referencian).
+router.use(auth);
+
+router.get('/', validate(ListUnitsQuerySchema, 'query'), listUnitsController);
+// Antes de /:id para que "convert" no se lea como id.
+router.get('/convert', validate(ConvertQuerySchema, 'query'), convertController);
+router.get('/:id', validate(byId), getUnitController);
+router.post('/', admin, validate(CreateUnitSchema), createUnitController);
+router.patch('/:id', admin, validate({ ...byId, body: UpdateUnitSchema }), updateUnitController);
+router.post('/:id/deactivate', admin, validate(byId), deactivateUnitController);
+router.post('/:id/activate', admin, validate(byId), activateUnitController);
 
 export default router;

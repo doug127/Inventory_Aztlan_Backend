@@ -1,67 +1,33 @@
-import {
-    getAllUnitsService,
-    getUnitByIdService,
-    getBaseUnitsService,
-    createUnitService,
-    updateUnitService,
-    deleteUnitService
-} from './unit.service.js';
+import * as unitService from './unit.service.js';
+import { addLogContext, sendCreated, sendOk, sendPaginated } from '#src/shared/http/response.js';
 
-export const getAllUnitsController = async (req, res) => {
-    try {
-        const units = await getAllUnitsService(req.query);
-        res.status(200).json(units);
-    } catch (error) {
-        res.status(500).json({ error: error.message });
-    }
-};
+// Sin try/catch: Express 5 lleva cualquier error de una función async al errorHandler.
 
-export const getUnitByIdController = async (req, res) => {
-    try {
-        const { id } = req.params;
-        const unit = await getUnitByIdService(id);
-        res.status(200).json(unit);
-    } catch (error) {
-        res.status(404).json({ error: error.message });
-    }
-};
+export const listUnitsController = async (req, res) => sendPaginated(res, await unitService.listUnits(req.validated.query));
 
-export const getBaseUnitsController = async (req, res) => {
-    try {
-        const units = await getBaseUnitsService();
-        res.status(200).json(units);
-    } catch (error) {
-        res.status(404).json({ error: error.message });
-    }
-};
+export const getUnitController = async (req, res) => sendOk(res, await unitService.getUnit(req.validated.params.id));
+
+export const convertController = async (req, res) => sendOk(res, await unitService.convert(req.validated.query));
 
 export const createUnitController = async (req, res) => {
-    try {
-        const data = req.validatedData;  
-        const newUnit = await createUnitService(data);
-        res.status(201).json(newUnit);
-    } catch (error) {
-        res.status(400).json({ error: error.message });
-    }
+  const unit = await unitService.createUnit(req.validated.body);
+  addLogContext(res, { created: unit.code });
+  return sendCreated(res, unit);
 };
 
 export const updateUnitController = async (req, res) => {
-    try {
-        const { id } = req.params;
-        const data = req.validatedData;  
-        const updatedUnit = await updateUnitService(id, data);
-        res.status(200).json(updatedUnit);
-    } catch (error) {
-        res.status(400).json({ error: error.message });
-    }
+  addLogContext(res, { target: req.validated.params.id, fields: Object.keys(req.validated.body).join(',') });
+  return sendOk(res, await unitService.updateUnit(req.validated.params.id, req.validated.body));
 };
 
-export const deleteUnitController = async (req, res) => {
-    try {
-        const { id } = req.params;
-        const deletedUnit = await deleteUnitService(id);
-        res.status(200).json(deletedUnit);
-    } catch (error) {
-        res.status(400).json({ error: error.message });
-    }
+export const deactivateUnitController = async (req, res) => {
+  const unit = await unitService.deactivateUnit(req.validated.params.id);
+  addLogContext(res, { target: unit.code });
+  return sendOk(res, unit);
+};
+
+export const activateUnitController = async (req, res) => {
+  const unit = await unitService.activateUnit(req.validated.params.id);
+  addLogContext(res, { target: unit.code });
+  return sendOk(res, unit);
 };

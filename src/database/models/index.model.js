@@ -43,8 +43,8 @@ Unit.hasMany(Product, { foreignKey: 'unit_id' });
 Product.belongsTo(Unit, { foreignKey: 'unit_id' });
 
 // * Relación uno a muchos entre Unit y Unit (auto-relación para unidades base y derivadas)
-Unit.belongsTo(Unit, { foreignKey: 'base_unit_id', as: 'base_unit' });
-Unit.hasMany(Unit, { foreignKey: 'base_unit_id', as: 'derived_units' });
+Unit.belongsTo(Unit, { foreignKey: 'baseUnitId', as: 'baseUnit' });
+Unit.hasMany(Unit, { foreignKey: 'baseUnitId', as: 'derivedUnits' });
 
 // * Relación uno a muchos entre Product y Stock
 Product.hasMany(Stock, { foreignKey: 'product_id' });
