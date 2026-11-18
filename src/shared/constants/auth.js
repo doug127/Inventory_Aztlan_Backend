@@ -17,6 +17,8 @@ export const ACCESS_TOKEN_TTL_SECONDS = 15 * 60;
 // business_rules.md §9.3: el refresh token vive 7 días y rota en cada uso.
 export const REFRESH_TOKEN_TTL_MS = 7 * 24 * 60 * 60 * 1000;
 export const REFRESH_COOKIE_NAME = 'refreshToken';
+// Marca "no mantener sesión" (valor '0'): la cookie del refresh token no lleva expires.
+export const REMEMBER_COOKIE_NAME = 'rememberSession';
 // La cookie solo viaja a las rutas de auth, no a todo el API.
 export const REFRESH_COOKIE_PATH = '/api/auth';
 

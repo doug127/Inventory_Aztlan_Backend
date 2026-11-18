@@ -4,16 +4,19 @@ import { z } from 'zod';
 // se valida al crear o cambiar la contraseña, nunca al iniciar sesión: hacerlo aquí rechazaría
 // contraseñas válidas y le diría a un atacante qué formato buscar.
 export const LoginSchema = z.object({
+  // Acepta el username o el correo (la pantalla de login pide el correo).
   username: z
-    .string({ error: 'El nombre de usuario es obligatorio' })
+    .string({ error: 'El usuario o correo es obligatorio' })
     .trim()
-    .min(1, 'El nombre de usuario es obligatorio')
-    .max(150, 'El nombre de usuario es demasiado largo')
+    .min(1, 'El usuario o correo es obligatorio')
+    .max(150, 'El usuario o correo es demasiado largo')
     .transform((value) => value.toLowerCase()),
   password: z
     .string({ error: 'La contraseña es obligatoria' })
     .min(1, 'La contraseña es obligatoria')
     .max(128, 'La contraseña es demasiado larga'),
+  // "Mantener sesión": con false, la cookie del refresh token se borra al cerrar el navegador.
+  remember: z.boolean({ error: 'remember debe ser true o false' }).optional().default(true),
 }).strict();
 
 // refresh_tokens.id es BIGINT: llega y sale como string de dígitos.

@@ -1,6 +1,6 @@
 import * as authService from './auth.service.js';
 import { addLogContext, sendList, sendNoContent, sendOk } from '#src/shared/http/response.js';
-import { REFRESH_COOKIE_NAME, REFRESH_COOKIE_PATH } from '#src/shared/constants/auth.js';
+import { REFRESH_COOKIE_NAME, REFRESH_COOKIE_PATH, REMEMBER_COOKIE_NAME } from '#src/shared/constants/auth.js';
 
 // Sin try/catch: Express 5 lleva cualquier error de una función async al errorHandler.
 
@@ -16,22 +16,34 @@ const refreshCookieOptions = () => ({
   path: REFRESH_COOKIE_PATH,
 });
 
-const setRefreshCookie = (res, { value, expiresAt }) =>
-  res.cookie(REFRESH_COOKIE_NAME, value, { ...refreshCookieOptions(), expires: new Date(expiresAt) });
+// "Mantener sesión" desmarcado: el refresh token va en una cookie de sesión del navegador (sin
+// expires), que se borra al cerrarlo. La elección se recuerda en REMEMBER_COOKIE_NAME para que
+// las renovaciones y el cambio de contraseña la respeten. No es un secreto: solo dice "no persistir".
+const isPersistent = (req) => req.cookies?.[REMEMBER_COOKIE_NAME] !== '0';
 
-const clearRefreshCookie = (res) => res.clearCookie(REFRESH_COOKIE_NAME, refreshCookieOptions());
+const setRefreshCookie = (res, { value, expiresAt }, { persistent = true } = {}) => {
+  const options = refreshCookieOptions();
+  res.cookie(REFRESH_COOKIE_NAME, value, persistent ? { ...options, expires: new Date(expiresAt) } : options);
+  if (persistent) res.clearCookie(REMEMBER_COOKIE_NAME, options);
+  else res.cookie(REMEMBER_COOKIE_NAME, '0', options);
+};
+
+const clearRefreshCookie = (res) => {
+  res.clearCookie(REFRESH_COOKIE_NAME, refreshCookieOptions());
+  res.clearCookie(REMEMBER_COOKIE_NAME, refreshCookieOptions());
+};
 
 export const loginController = async (req, res) => {
   addLogContext(res, { target: req.validated.body.username });
   const { session, refreshToken } = await authService.login(req.validated.body, requestContext(req));
-  setRefreshCookie(res, refreshToken);
+  setRefreshCookie(res, refreshToken, { persistent: req.validated.body.remember });
   return sendOk(res, session);
 };
 
 export const refreshController = async (req, res) => {
   try {
     const { session, refreshToken } = await authService.refreshSession(req.cookies?.[REFRESH_COOKIE_NAME], requestContext(req));
-    setRefreshCookie(res, refreshToken);
+    setRefreshCookie(res, refreshToken, { persistent: isPersistent(req) });
     addLogContext(res, { target: session.user.username });
     return sendOk(res, session);
   } catch (error) {
@@ -47,7 +59,7 @@ export const meController = async (req, res) => sendOk(res, await authService.ge
 export const changePasswordController = async (req, res) => {
   addLogContext(res, { target: req.user.username });
   const { session, refreshToken } = await authService.changePassword(req.user, req.validated.body, requestContext(req));
-  setRefreshCookie(res, refreshToken);
+  setRefreshCookie(res, refreshToken, { persistent: isPersistent(req) });
   return sendOk(res, session);
 };
 

@@ -555,3 +555,44 @@ describe('permisos por rol con tokens reales (auth + authorizeRole)', () => {
     expect(body.error.code).toBe('FORBIDDEN_ROLE');
   });
 });
+
+describe('POST /api/auth/login: correo y "Mantener sesión"', () => {
+  it('acepta el correo en lugar del username (sin distinguir mayúsculas)', async () => {
+    const user = await createTestUser({ name: 'login.correo' });
+    const res = await api.post('/api/auth/login', {
+      body: { username: `  ${user.username.toUpperCase()}@AZTLAN.TEST `, password: user.password },
+    });
+    expect(res.status).toBe(200);
+    expect(res.body.data.user.username).toBe(user.username);
+  });
+
+  it('un correo inexistente responde el mismo error genérico', async () => {
+    const res = await api.post('/api/auth/login', { body: { username: 'test.nadie@aztlan.test', password: 'Clave-Prueba-1' } });
+    expect(res.status).toBe(401);
+    expect(res.body.error.message).toBe(GENERIC_MESSAGE);
+  });
+
+  it('por defecto la cookie del refresh token persiste 7 días', async () => {
+    const user = await createTestUser({ name: 'login.recordar' });
+    const res = await api.post('/api/auth/login', { body: { username: user.username, password: user.password } });
+    expect(res.readCookie(REFRESH).attributes.expires).toBeDefined();
+  });
+
+  it('con remember=false la cookie es de sesión del navegador, también tras renovarla', async () => {
+    const user = await createTestUser({ name: 'login.norecordar' });
+    const res = await api.post('/api/auth/login', { body: { username: user.username, password: user.password, remember: false } });
+    expect(res.status).toBe(200);
+    const refresh = res.readCookie(REFRESH);
+    expect(refresh.attributes.expires).toBeUndefined();
+    expect(res.readCookie('rememberSession').value).toBe('0');
+
+    const renewed = await api.post('/api/auth/refresh', { cookie: `${REFRESH}=${refresh.value}; rememberSession=0` });
+    expect(renewed.status).toBe(200);
+    expect(renewed.readCookie(REFRESH).attributes.expires).toBeUndefined();
+  });
+
+  it('remember debe ser booleano', async () => {
+    const res = await api.post('/api/auth/login', { body: { username: 'x', password: 'y', remember: 'si' } });
+    expect(res.status).toBe(400);
+  });
+});

@@ -9,8 +9,18 @@ const plain = (row) => (row ? row.get({ plain: true }) : null);
 
 // --- Usuarios ---------------------------------------------------------------
 
-export const findUserForLogin = async (username, { transaction } = {}) =>
-  plain(await User.unscoped().findOne({ where: { username }, include: [ROLE_INCLUDE], transaction }));
+/**
+ * Busca por username o por correo: el username no admite '@' (chk_users_username), así que un
+ * identificador con '@' solo puede ser un correo. Ambos se guardan en minúsculas.
+ */
+export const findUserForLogin = async (identifier, { transaction } = {}) =>
+  plain(
+    await User.unscoped().findOne({
+      where: identifier.includes('@') ? { email: identifier } : { username: identifier },
+      include: [ROLE_INCLUDE],
+      transaction,
+    })
+  );
 
 export const findUserWithPasswordById = async (id, { transaction } = {}) =>
   plain(await User.unscoped().findByPk(id, { include: [ROLE_INCLUDE], transaction }));
