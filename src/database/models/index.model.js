@@ -1,7 +1,7 @@
 import sequelize from '#src/config/config.cjs';
 import {User} from './User.js';
 import {Role} from './Role.js';
-import {CategoryProduct} from './CategoryProduct.js';
+import {ProductCategory} from './ProductCategory.js';
 import {Unit} from './Unit.js';
 import {Product} from './Product.js';
 import {Warehouse} from './Warehouse.js';
@@ -32,11 +32,15 @@ User.hasMany(PasswordResetToken, { foreignKey: 'userId', as: 'passwordResetToken
 PasswordResetToken.belongsTo(User, { foreignKey: 'userId', as: 'user' });
 EmailOutbox.belongsTo(PasswordResetToken, { foreignKey: 'passwordResetTokenId', as: 'passwordResetToken' });
 
-// * Relación uno a muchos entre CategoryProduct y Product
-CategoryProduct.hasMany(Product, { foreignKey: 'product_category_id' });
-Product.belongsTo(CategoryProduct, { foreignKey: 'product_category_id' });
+// * Categorías de productos: árbol (padre / hijas) y sus productos.
+// El modelo Product sigue siendo el del esquema anterior (REF-S1): su FK es product_category_id.
+ProductCategory.belongsTo(ProductCategory, { foreignKey: 'parentId', as: 'parent' });
+ProductCategory.hasMany(ProductCategory, { foreignKey: 'parentId', as: 'children' });
+ProductCategory.hasMany(Product, { foreignKey: 'product_category_id' });
+Product.belongsTo(ProductCategory, { foreignKey: 'product_category_id' });
 
-CategoryProduct.belongsTo(CategoryProduct, { foreignKey: 'parent_id', as: 'parent' });
+// Compatibilidad: los módulos de productos y stock anteriores (REF-S1) importan este nombre.
+const CategoryProduct = ProductCategory;
 
 // * Relación uno a muchos entre Unit y Product
 Unit.hasMany(Product, { foreignKey: 'unit_id' });
@@ -121,6 +125,7 @@ MovementTarget.belongsTo(Asset, {
 export {
   User,
   Role,
+  ProductCategory,
   CategoryProduct,
   Product,
   Unit,
