@@ -46,6 +46,7 @@ export const startServer = async (app) => {
     get: (path, options) => request('GET', path, options),
     post: (path, options) => request('POST', path, options),
     patch: (path, options) => request('PATCH', path, options),
+    delete: (path, options) => request('DELETE', path, options),
     close: () => new Promise((resolve) => server.close(resolve)),
   };
 };

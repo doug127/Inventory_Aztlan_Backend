@@ -37,3 +37,24 @@ export const toSessionUser = (user) => ({
   hierarchy: user.role.hierarchy,
   mustChangePassword: user.mustChangePassword,
 });
+
+// HU-109: una sesión activa (un dispositivo). Nunca incluye el hash del token.
+// El id cambia en cada renovación (rotación); DELETE /sessions/:id acepta un id ya rotado.
+export const SessionDto = z.object({
+  id: z.string(),
+  userAgent: z.string().nullable(),
+  ipAddress: z.string().nullable(),
+  lastActiveAt: z.date(),
+  expiresAt: z.date(),
+  current: z.boolean(),
+});
+
+export const toSessionDto = (token, current) =>
+  SessionDto.parse({
+    id: String(token.id),
+    userAgent: token.userAgent ?? null,
+    ipAddress: token.ipAddress ?? null,
+    lastActiveAt: new Date(token.createdAt),
+    expiresAt: new Date(token.expiresAt),
+    current,
+  });

@@ -17,7 +17,7 @@ import { passwordPolicyIssues } from '#src/shared/schemas/password.js';
 import * as emailService from '#src/modules/email/email.service.js';
 import * as authRepository from './auth.repository.js';
 import { generateOpaqueToken, generateTemporaryPassword, hashToken, signAccessToken } from './token.service.js';
-import { toAuthUserDto, toSessionUser } from './auth.dto.js';
+import { toAuthUserDto, toSessionDto, toSessionUser } from './auth.dto.js';
 
 // Hash ficticio para comparar cuando el usuario no existe: así el tiempo de respuesta es el mismo
 // y no revela qué nombres de usuario existen. Se calcula al cargar el módulo, no en el primer login,
@@ -552,6 +552,87 @@ export const revokeAccountAccess = async (userId, { transaction }) => {
   await authRepository.invalidateActiveResetTokens(userId, { transaction });
   return { revokedSessions };
 };
+
+// --- Sesiones activas (HU-109) -----------------------------------------------
+//
+// Una sesión es el refresh token vigente de un dispositivo. Como el token rota en cada renovación
+// (cada ~15 min), el id que vio la pantalla puede haber cambiado cuando el usuario pulsa
+// [Cerrar esta sesión]; por eso se sigue la cadena de rotación hasta el token vigente.
+
+const MAX_ROTATION_STEPS = 50; // ~12 h de renovaciones; más allá, la lista ya estaba muy desactualizada
+
+/** El refresh token de la cookie, si existe, está vigente y es del usuario. */
+const findCurrentRefreshToken = async (actor, rawRefreshToken, options) => {
+  if (!rawRefreshToken) return null;
+  const stored = await authRepository.findRefreshTokenByHash(hashToken(rawRefreshToken), options);
+  return stored && stored.userId === actor.id && !stored.revokedAt ? stored : null;
+};
+
+/** Sesiones activas del usuario, de la más reciente a la más antigua, marcando la de este dispositivo. */
+export const listSessions = async (actor, rawRefreshToken) => {
+  const currentHash = rawRefreshToken ? hashToken(rawRefreshToken) : null;
+  const tokens = await authRepository.listActiveRefreshTokens(actor.id, new Date());
+  return tokens.map((token) => toSessionDto(token, token.tokenHash === currentHash));
+};
+
+/**
+ * Cierra una sesión del usuario. Si el id es de otro usuario, no existe o ya no está activa,
+ * responde NOT_FOUND (no se revela si la sesión de otro existe). Devuelve { current } para que el
+ * controller borre la cookie si el usuario cerró la sesión de este mismo dispositivo.
+ */
+export const revokeSession = async (actor, sessionId, rawRefreshToken, context = {}) => {
+  const now = new Date();
+  const outcome = await withTransaction(async (transaction) => {
+    let token = await authRepository.findRefreshTokenById(sessionId, { transaction, lock: true });
+    for (let step = 0; token?.revokedAt && token.replacedByTokenId && step < MAX_ROTATION_STEPS; step += 1) {
+      token = await authRepository.findRefreshTokenById(token.replacedByTokenId, { transaction, lock: true });
+    }
+    if (!token || token.userId !== actor.id || token.revokedAt || new Date(token.expiresAt) <= now) return null;
+
+    await authRepository.revokeRefreshToken(token.id, { revokedAt: now }, { transaction });
+    await authRepository.createAuthEvent(
+      { userId: actor.id, usernameAttempted: actor.username, eventType: AUTH_EVENT_TYPES.LOGOUT, ...eventContext(context) },
+      { transaction }
+    );
+    return { current: Boolean(rawRefreshToken) && token.tokenHash === hashToken(rawRefreshToken) };
+  });
+
+  if (!outcome) throw new AppError('NOT_FOUND', { message: 'La sesión no existe o ya fue cerrada' });
+  return outcome;
+};
+
+/** [Cerrar todas las demás]: revoca todas las sesiones del usuario salvo la de este dispositivo. */
+export const revokeOtherSessions = async (actor, rawRefreshToken, context = {}) =>
+  withTransaction(async (transaction) => {
+    const current = await findCurrentRefreshToken(actor, rawRefreshToken, { transaction });
+    const revokedSessions = await authRepository.revokeRefreshTokensExcept(actor.id, current?.id ?? null, { transaction });
+    if (revokedSessions) {
+      await authRepository.createAuthEvent(
+        { userId: actor.id, usernameAttempted: actor.username, eventType: AUTH_EVENT_TYPES.LOGOUT, ...eventContext(context) },
+        { transaction }
+      );
+    }
+    return { revokedSessions, keptCurrent: Boolean(current) };
+  });
+
+/**
+ * [Cerrar sesiones] desde la ficha del usuario (administrador). Revoca todos sus refresh tokens:
+ * cada dispositivo pierde la sesión al vencer su access token (máximo 15 minutos), igual que al
+ * desactivar una cuenta (business_rules.md §9.3.5).
+ */
+export const revokeAllSessions = async (userId, context = {}) =>
+  withTransaction(async (transaction) => {
+    const user = await authRepository.findAccountStateForUpdate(userId, { transaction });
+    if (!user) return null;
+    const revokedSessions = await authRepository.revokeAllRefreshTokens(user.id, { transaction });
+    if (revokedSessions) {
+      await authRepository.createAuthEvent(
+        { userId: user.id, usernameAttempted: user.username, eventType: AUTH_EVENT_TYPES.LOGOUT, ...eventContext(context) },
+        { transaction }
+      );
+    }
+    return { revokedSessions };
+  });
 
 /**
  * Cierre de sesión: revoca el refresh token de este dispositivo (si es del usuario) y registra LOGOUT.

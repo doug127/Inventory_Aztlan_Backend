@@ -16,6 +16,11 @@ export const LoginSchema = z.object({
     .max(128, 'La contraseña es demasiado larga'),
 }).strict();
 
+// refresh_tokens.id es BIGINT: llega y sale como string de dígitos.
+export const SessionIdParamsSchema = z.object({
+  id: z.string().regex(/^[1-9]\d{0,18}$/, 'El id de la sesión no es válido'),
+});
+
 export const ForgotPasswordSchema = z.object({
   email: z
     .string({ error: 'El correo es obligatorio' })

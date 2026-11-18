@@ -12,6 +12,7 @@ import movementRoutes from '#src/modules/movement/movement.route.js';
 import assetTypeRouter from '#src/modules/asset/asset_type/asset_type.route.js';
 import assetRouter from '#src/modules/asset/asset.route.js';
 import devRoutes from '#src/modules/dev/dev.route.js';
+import securityEventRoutes from '#src/modules/security_event/security_event.route.js';
 
 const routes = Router();
 
@@ -27,6 +28,7 @@ routes.use('/movement-types', movementTypes);
 routes.use('/reasons', reasonRoutes);
 routes.use('/asset-types', assetTypeRouter);
 routes.use('/assets', assetRouter);
+routes.use('/security-events', securityEventRoutes);
 // Solo desarrollo (NODE_ENV != production, ENABLE_DEV_TOOLS=true y desde localhost); si no, 404.
 routes.use('/dev', devRoutes);
 

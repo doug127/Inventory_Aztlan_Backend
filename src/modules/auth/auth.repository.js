@@ -73,6 +73,31 @@ export const revokeRefreshToken = async (id, { revokedAt = new Date(), replacedB
   await RefreshToken.update({ revokedAt, replacedByTokenId }, { where: { id, revokedAt: null }, transaction });
 };
 
+/**
+ * Sesiones activas del usuario: un refresh token por dispositivo, sin revocar y sin vencer.
+ * Cada renovación crea una fila nueva, así que created_at es la última actividad del dispositivo.
+ */
+export const listActiveRefreshTokens = async (userId, now = new Date()) =>
+  (
+    await RefreshToken.findAll({
+      where: { userId, revokedAt: null, expiresAt: { [Op.gt]: now } },
+      attributes: ['id', 'tokenHash', 'userAgent', 'ipAddress', 'createdAt', 'expiresAt'],
+      order: [['createdAt', 'DESC'], ['id', 'DESC']],
+    })
+  ).map(plain);
+
+export const findRefreshTokenById = async (id, { transaction, lock = false } = {}) =>
+  plain(await RefreshToken.findByPk(id, { transaction, lock: lock ? Transaction.LOCK.UPDATE : undefined }));
+
+/** Revoca las sesiones vigentes del usuario salvo `exceptId`. Devuelve cuántas se revocaron. */
+export const revokeRefreshTokensExcept = async (userId, exceptId, { transaction } = {}) => {
+  const [count] = await RefreshToken.update(
+    { revokedAt: new Date() },
+    { where: { userId, revokedAt: null, ...(exceptId && { id: { [Op.ne]: exceptId } }) }, transaction }
+  );
+  return count;
+};
+
 /** Revoca todas las sesiones vigentes del usuario. Devuelve cuántas se revocaron. */
 export const revokeAllRefreshTokens = async (userId, { transaction } = {}) => {
   const [count] = await RefreshToken.update(

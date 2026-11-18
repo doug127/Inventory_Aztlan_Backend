@@ -1,5 +1,5 @@
 import * as authService from './auth.service.js';
-import { addLogContext, sendNoContent, sendOk } from '#src/shared/http/response.js';
+import { addLogContext, sendList, sendNoContent, sendOk } from '#src/shared/http/response.js';
 import { REFRESH_COOKIE_NAME, REFRESH_COOKIE_PATH } from '#src/shared/constants/auth.js';
 
 // Sin try/catch: Express 5 lleva cualquier error de una función async al errorHandler.
@@ -68,6 +68,30 @@ export const resetPasswordController = async (req, res) => {
   // Las sesiones se revocaron: la cookie de este navegador, si la hay, ya no sirve.
   clearRefreshCookie(res);
   return sendNoContent(res);
+};
+
+// --- Sesiones activas (HU-109) ---
+
+export const listSessionsController = async (req, res) =>
+  sendList(res, await authService.listSessions(req.user, req.cookies?.[REFRESH_COOKIE_NAME]));
+
+export const revokeSessionController = async (req, res) => {
+  addLogContext(res, { target: req.validated.params.id });
+  const { current } = await authService.revokeSession(
+    req.user,
+    req.validated.params.id,
+    req.cookies?.[REFRESH_COOKIE_NAME],
+    requestContext(req)
+  );
+  // Cerró la sesión de este mismo dispositivo: la cookie ya no sirve.
+  if (current) clearRefreshCookie(res);
+  return sendNoContent(res);
+};
+
+export const revokeOtherSessionsController = async (req, res) => {
+  const result = await authService.revokeOtherSessions(req.user, req.cookies?.[REFRESH_COOKIE_NAME], requestContext(req));
+  addLogContext(res, { revoked: result.revokedSessions });
+  return sendOk(res, result);
 };
 
 export const logoutController = async (req, res) => {

@@ -49,3 +49,9 @@ export const forcePasswordResetController = async (req, res) => {
   addLogContext(res, { target: result.user.username, revokedSessions: result.revokedSessions });
   return sendOk(res, { message: FORCE_RESET_MESSAGE, ...result }, { status: 202 });
 };
+
+export const revokeUserSessionsController = async (req, res) => {
+  const result = await userService.revokeUserSessions(req.user, req.validated.params.id, requestContext(req));
+  addLogContext(res, { target: result.user.username, revokedSessions: result.revokedSessions });
+  return sendOk(res, result);
+};

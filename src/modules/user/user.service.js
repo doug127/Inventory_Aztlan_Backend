@@ -231,3 +231,20 @@ export const forcePasswordReset = async (actor, id, context = {}) => {
 
   return { user: toUserDto(await findUserOrFail(target.id)), revokedSessions: result.revokedSessions };
 };
+
+/**
+ * [Cerrar sesiones] (user_flow.md §12): revoca todos los refresh tokens del usuario. Cada
+ * dispositivo pierde la sesión al vencer su access token (máximo 15 minutos). Para las propias,
+ * el actor usa DELETE /api/auth/sessions.
+ */
+export const revokeUserSessions = async (actor, id, context = {}) => {
+  const target = await findUserOrFail(id);
+  if (target.id === actor.id) {
+    throw hierarchyError('Para cerrar sus propias sesiones use DELETE /api/auth/sessions');
+  }
+  if (!outranks(actor, target.role.hierarchy)) throw hierarchyError();
+
+  const result = await authService.revokeAllSessions(target.id, context);
+  if (!result) throw new AppError('NOT_FOUND', { message: `Usuario ${id} no encontrado` });
+  return { user: toUserDto(target), revokedSessions: result.revokedSessions };
+};
