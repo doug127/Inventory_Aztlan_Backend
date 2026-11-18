@@ -77,6 +77,8 @@ export const ListUsersQuerySchema = z.object({
   roleCode: roleCodeField.optional(),
   isActive: booleanQuery('isActive'),
   isLocked: booleanQuery('isLocked'),
+  // true: con al menos una sesión abierta; false: sin sesiones (desconectado).
+  connected: booleanQuery('connected'),
   sort: z.enum(USER_SORT_FIELDS, { error: `sort debe ser uno de: ${USER_SORT_FIELDS.join(', ')}` }).default('username'),
   order: z.enum(['asc', 'desc'], { error: 'order debe ser asc o desc' }).default('asc'),
 });

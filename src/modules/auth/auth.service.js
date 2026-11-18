@@ -615,6 +615,10 @@ export const revokeOtherSessions = async (actor, rawRefreshToken, context = {}) 
     return { revokedSessions, keptCurrent: Boolean(current) };
   });
 
+/** Sesiones activas de otro usuario, para su ficha (administrador). Ninguna es "la actual". */
+export const listUserSessions = async (userId) =>
+  (await authRepository.listActiveRefreshTokens(userId, new Date())).map((token) => toSessionDto(token, false));
+
 /**
  * [Cerrar sesiones] desde la ficha del usuario (administrador). Revoca todos sus refresh tokens:
  * cada dispositivo pierde la sesión al vencer su access token (máximo 15 minutos), igual que al

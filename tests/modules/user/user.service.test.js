@@ -269,3 +269,17 @@ describe('HU-108: unlockUser y forcePasswordReset', () => {
     expect(authService.forcePasswordReset).not.toHaveBeenCalled();
   });
 });
+
+describe('toUserDto: estado de conexión', async () => {
+  const { toUserDto } = await import('#src/modules/user/user.dto.js');
+  const now = new Date('2026-11-17T12:00:00Z');
+  const minutesAgo = (m) => new Date(now.getTime() - m * 60_000);
+
+  it.each([
+    [0, null, 'OFFLINE'],
+    [1, minutesAgo(5), 'ONLINE'],
+    [2, minutesAgo(45), 'IDLE'],
+  ])('%i sesiones, última actividad %s → %s', (active, lastActivityAt, status) => {
+    expect(toUserDto(user('USUARIO', { activeSessions: active, lastActivityAt }), now).sessions.status).toBe(status);
+  });
+});

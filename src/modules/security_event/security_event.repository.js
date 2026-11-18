@@ -6,13 +6,8 @@ const plain = (row) => (row ? row.get({ plain: true }) : null);
 
 const escapeLike = (value) => value.replace(/[\\%_]/g, (ch) => `\\${ch}`);
 
-/**
- * Lista paginada con filtros. `visibility` limita qué eventos ve el actor:
- *   null → todos (SUPERADMIN)
- *   { selfId, minHierarchyExclusive } → los suyos, los de usuarios de rango inferior y los de
- *   nombres de usuario inexistentes (user_id NULL).
- */
-export const listSecurityEvents = async ({ page, limit, userId, username, eventType, ip, from, to, order, visibility }) => {
+/** Lista paginada con filtros (todos combinables). */
+export const listSecurityEvents = async ({ page, limit, userId, username, eventType, ip, from, to, order }) => {
   const and = [];
   if (userId) and.push({ userId });
   if (eventType?.length) and.push({ eventType: eventType.length === 1 ? eventType[0] : { [Op.in]: eventType } });
@@ -22,15 +17,6 @@ export const listSecurityEvents = async ({ page, limit, userId, username, eventT
   if (username) {
     const pattern = `%${escapeLike(username)}%`;
     and.push({ [Op.or]: [{ usernameAttempted: { [Op.iLike]: pattern } }, { '$user.username$': { [Op.iLike]: pattern } }] });
-  }
-  if (visibility) {
-    and.push({
-      [Op.or]: [
-        { userId: null },
-        { userId: visibility.selfId },
-        { '$user.role.hierarchy$': { [Op.gt]: visibility.minHierarchyExclusive } },
-      ],
-    });
   }
 
   const direction = order === 'asc' ? 'ASC' : 'DESC';
@@ -42,13 +28,13 @@ export const listSecurityEvents = async ({ page, limit, userId, username, eventT
         as: 'user',
         required: false,
         attributes: ['id', 'username', 'fullName'],
-        include: [{ model: Role, as: 'role', attributes: ['code', 'name', 'hierarchy'] }],
+        include: [{ model: Role, as: 'role', attributes: ['code', 'name'] }],
       },
     ],
     order: [['createdAt', direction], ['id', direction]],
     limit,
     offset: (page - 1) * limit,
-    // Las condiciones sobre $user...$ deben ir en la consulta principal, no en una subconsulta.
+    // La condición sobre $user.username$ debe ir en la consulta principal, no en una subconsulta.
     subQuery: false,
   });
   return { items: rows.map(plain), total: count };

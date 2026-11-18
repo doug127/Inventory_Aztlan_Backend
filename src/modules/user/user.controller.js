@@ -1,5 +1,5 @@
 import * as userService from './user.service.js';
-import { addLogContext, sendCreated, sendOk, sendPaginated } from '#src/shared/http/response.js';
+import { addLogContext, sendCreated, sendList, sendOk, sendPaginated } from '#src/shared/http/response.js';
 
 // Sin try/catch: Express 5 lleva cualquier error de una función async al errorHandler.
 
@@ -55,3 +55,6 @@ export const revokeUserSessionsController = async (req, res) => {
   addLogContext(res, { target: result.user.username, revokedSessions: result.revokedSessions });
   return sendOk(res, result);
 };
+
+export const listUserSessionsController = async (req, res) =>
+  sendList(res, await userService.listUserSessions(req.user, req.validated.params.id));

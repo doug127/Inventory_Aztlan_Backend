@@ -1,4 +1,4 @@
-// Unitaria de la visibilidad de la bitácora (HU-110) con el repository simulado.
+// Unitaria del service de la bitácora (HU-110) con el repository simulado.
 import { describe, it, expect, vi, beforeEach } from 'vitest';
 
 vi.mock('#src/modules/security_event/security_event.repository.js', () => ({ listSecurityEvents: vi.fn() }));
@@ -23,19 +23,14 @@ beforeEach(() => {
 });
 
 describe('listSecurityEvents', () => {
-  it('un ADMIN ve lo suyo, lo de rango inferior y lo de usuarios inexistentes', async () => {
-    await service.listSecurityEvents({ id: 3, roleCode: 'ADMIN', hierarchy: 1 }, query);
-    expect(repo.listSecurityEvents).toHaveBeenCalledWith({ ...query, visibility: { selfId: 3, minHierarchyExclusive: 1 } });
+  it('pasa los filtros al repository sin restricciones de visibilidad (solo el SUPERADMIN llega aquí)', async () => {
+    await service.listSecurityEvents(query);
+    expect(repo.listSecurityEvents).toHaveBeenCalledWith(query);
   });
 
-  it('el SUPERADMIN ve todo', async () => {
-    await service.listSecurityEvents({ id: 1, roleCode: 'SUPERADMIN', hierarchy: 0 }, query);
-    expect(repo.listSecurityEvents).toHaveBeenCalledWith({ ...query, visibility: null });
-  });
-
-  it('devuelve el DTO sin la jerarquía interna y los filtros aplicados en meta', async () => {
+  it('devuelve el DTO y los filtros aplicados en meta', async () => {
     const from = new Date('2026-11-01T00:00:00Z');
-    const result = await service.listSecurityEvents({ id: 1, roleCode: 'SUPERADMIN', hierarchy: 0 }, { ...query, eventType: ['LOGIN_FAILED'], from });
+    const result = await service.listSecurityEvents({ ...query, eventType: ['LOGIN_FAILED'], from });
     expect(result.items[0]).toEqual({
       id: '10',
       eventType: 'LOGIN_FAILED',

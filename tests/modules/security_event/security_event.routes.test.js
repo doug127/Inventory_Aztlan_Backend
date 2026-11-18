@@ -34,8 +34,10 @@ afterAll(async () => {
 });
 
 describe('acceso', () => {
-  it('ALMACENISTA y USUARIO → 403 FORBIDDEN_ROLE; sin sesión → 401', async () => {
+  it('solo el SUPERADMIN: ADMIN, ALMACENISTA y USUARIO → 403 FORBIDDEN_ROLE; sin sesión → 401', async () => {
     expect((await api.get('/api/security-events')).status).toBe(401);
+    expect((await events(admin.token)).body.error.code).toBe('FORBIDDEN_ROLE');
+    expect((await api.get('/api/security-events/event-types', { token: admin.token })).status).toBe(403);
     for (const roleCode of ['ALMACENISTA', 'USUARIO']) {
       const user = await createTestUser({ name: `se.sin.${roleCode.toLowerCase()}`, roleCode });
       const res = await events(await tokenOf(user));
@@ -52,7 +54,7 @@ describe('GET /api/security-events', () => {
     await failLogin(user.username);
     await tokenOf(user);
 
-    const res = await events(admin.token, `?userId=${user.id}&limit=2`);
+    const res = await events(superadmin.token, `?userId=${user.id}&limit=2`);
     expect(res.status).toBe(200);
     expect(res.body.data.map((e) => e.eventType)).toEqual(['LOGIN_SUCCESS', 'LOGIN_FAILED']);
     expect(res.body.data[0]).toMatchObject({
@@ -70,17 +72,17 @@ describe('GET /api/security-events', () => {
     const user = await createTestUser({ name: 'se.tipos', roleCode: 'USUARIO' });
     for (let i = 0; i < 5; i += 1) await failLogin(user.username); // el 5.º bloquea la cuenta
 
-    const locked = await events(admin.token, `?userId=${user.id}&eventType=account_locked`);
+    const locked = await events(superadmin.token, `?userId=${user.id}&eventType=account_locked`);
     expect(locked.body.data.map((e) => e.eventType)).toEqual(['ACCOUNT_LOCKED']);
 
-    const both = await events(admin.token, `?userId=${user.id}&eventType=ACCOUNT_LOCKED,LOGIN_FAILED`);
+    const both = await events(superadmin.token, `?userId=${user.id}&eventType=ACCOUNT_LOCKED,LOGIN_FAILED`);
     expect(both.body.meta.pagination.totalItems).toBe(6);
     expect(both.body.meta.filters.eventType).toEqual(['ACCOUNT_LOCKED', 'LOGIN_FAILED']);
   });
 
   it('busca por username, incluidos los intentos con usuarios inexistentes', async () => {
     await failLogin('test.se.fantasma');
-    const res = await events(admin.token, '?username=se.fantasma');
+    const res = await events(superadmin.token, '?username=se.fantasma');
     expect(res.body.data).toHaveLength(1);
     expect(res.body.data[0]).toMatchObject({ eventType: 'LOGIN_FAILED', usernameAttempted: 'test.se.fantasma', user: null });
   });
@@ -95,30 +97,28 @@ describe('GET /api/security-events', () => {
       return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`;
     };
 
-    const byIp = await events(admin.token, `?userId=${user.id}&ip=${encodeURIComponent(ipAddress)}`);
+    const byIp = await events(superadmin.token, `?userId=${user.id}&ip=${encodeURIComponent(ipAddress)}`);
     expect(byIp.body.data).toHaveLength(1);
-    expect((await events(admin.token, `?userId=${user.id}&ip=10.99.99.99`)).body.data).toHaveLength(0);
+    expect((await events(superadmin.token, `?userId=${user.id}&ip=10.99.99.99`)).body.data).toHaveLength(0);
 
-    expect((await events(admin.token, `?userId=${user.id}&from=${day(0)}&to=${day(0)}`)).body.data).toHaveLength(1);
-    expect((await events(admin.token, `?userId=${user.id}&to=${day(-1)}`)).body.data).toHaveLength(0);
-    expect((await events(admin.token, `?userId=${user.id}&from=${day(1)}`)).body.data).toHaveLength(0);
+    expect((await events(superadmin.token, `?userId=${user.id}&from=${day(0)}&to=${day(0)}`)).body.data).toHaveLength(1);
+    expect((await events(superadmin.token, `?userId=${user.id}&to=${day(-1)}`)).body.data).toHaveLength(0);
+    expect((await events(superadmin.token, `?userId=${user.id}&from=${day(1)}`)).body.data).toHaveLength(0);
   });
 
-  it('un ADMIN no ve los eventos de un SUPERADMIN ni de otro ADMIN; el SUPERADMIN sí', async () => {
+  it('el SUPERADMIN ve los eventos de todos los roles, incluidos ADMIN y otros SUPERADMIN', async () => {
     const otherAdmin = await createTestUser({ name: 'se.admin.otro', roleCode: 'ADMIN' });
+    const otherSuper = await createTestUser({ name: 'se.super.otro', roleCode: 'SUPERADMIN' });
     await failLogin(otherAdmin.username);
-    await failLogin(superadmin.username);
+    await failLogin(otherSuper.username);
 
-    expect((await events(admin.token, `?userId=${otherAdmin.id}`)).body.data).toHaveLength(0);
-    expect((await events(admin.token, `?userId=${superadmin.id}`)).body.data).toHaveLength(0);
     expect((await events(superadmin.token, `?userId=${otherAdmin.id}`)).body.data).toHaveLength(1);
-    // Sus propios eventos sí los ve.
-    expect((await events(admin.token, `?userId=${admin.id}&eventType=LOGIN_SUCCESS`)).body.data.length).toBeGreaterThan(0);
+    expect((await events(superadmin.token, `?userId=${otherSuper.id}`)).body.data[0].user.role.code).toBe('SUPERADMIN');
   });
 
   it('query inválida → 400 VALIDATION_ERROR', async () => {
     for (const query of ['?eventType=HACKEO', '?ip=999.1.1.1', '?from=ayer', '?limit=1000', '?from=2026-11-10&to=2026-11-01']) {
-      const res = await events(admin.token, query);
+      const res = await events(superadmin.token, query);
       expect(res.status, query).toBe(400);
       expect(res.body.error.code).toBe('VALIDATION_ERROR');
     }
@@ -127,7 +127,7 @@ describe('GET /api/security-events', () => {
 
 describe('GET /api/security-events/event-types', () => {
   it('devuelve el catálogo de tipos', async () => {
-    const res = await api.get('/api/security-events/event-types', { token: admin.token });
+    const res = await api.get('/api/security-events/event-types', { token: superadmin.token });
     expect(res.status).toBe(200);
     expect(res.body.data).toEqual(expect.arrayContaining(['LOGIN_SUCCESS', 'LOGIN_FAILED', 'ACCOUNT_LOCKED', 'ACCOUNT_UNLOCKED']));
   });

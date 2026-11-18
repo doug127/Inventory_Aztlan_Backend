@@ -334,3 +334,41 @@ describe('POST /api/dev/welcome-password', () => {
     expect(res.body.error.code).toBe('ROUTE_NOT_FOUND');
   });
 });
+
+describe('estado de sesiones en la lista y en la ficha (HU-109)', () => {
+  it('cada usuario trae sus sesiones abiertas y su estado de conexión', async () => {
+    const online = await createTestUser({ name: 'u.conectado', roleCode: 'USUARIO' });
+    await sessionOf(online);
+    await sessionOf(online);
+    const offline = await createTestUser({ name: 'u.desconectado', roleCode: 'USUARIO' });
+
+    const res = await as(admin).get('/api/users?search=test.u.&limit=100');
+    const byName = Object.fromEntries(res.body.data.map((u) => [u.username, u]));
+    expect(byName['test.u.conectado'].sessions).toMatchObject({ active: 2, status: 'ONLINE', lastActivityAt: expect.any(String) });
+    expect(byName['test.u.desconectado'].sessions).toEqual({ active: 0, lastActivityAt: null, status: 'OFFLINE' });
+
+    const connected = await as(admin).get('/api/users?search=test.u.&connected=true&limit=100');
+    const names = connected.body.data.map((u) => u.username);
+    expect(names).toContain('test.u.conectado');
+    expect(names).not.toContain('test.u.desconectado');
+    expect((await as(admin).get(`/api/users/${offline.id}`)).body.data.sessions.status).toBe('OFFLINE');
+  });
+
+  it('GET /:id/sessions lista los dispositivos del usuario; tras cerrarlas queda desconectado', async () => {
+    const target = await createTestUser({ name: 'u.dispositivos', roleCode: 'ALMACENISTA' });
+    await sessionOf(target);
+
+    const res = await as(admin).get(`/api/users/${target.id}/sessions`);
+    expect(res.status).toBe(200);
+    expect(res.body.data).toHaveLength(1);
+    expect(res.body.data[0]).toMatchObject({ id: expect.any(String), current: false, ipAddress: expect.any(String) });
+
+    await as(admin).post(`/api/users/${target.id}/revoke-sessions`);
+    expect((await as(admin).get(`/api/users/${target.id}`)).body.data.sessions).toMatchObject({ active: 0, status: 'OFFLINE' });
+  });
+
+  it('un ADMIN no ve las sesiones de otro ADMIN', async () => {
+    const other = await createTestUser({ name: 'u.sesiones.admin', roleCode: 'ADMIN' });
+    expect((await as(admin).get(`/api/users/${other.id}/sessions`)).body.error.code).toBe('FORBIDDEN_HIERARCHY');
+  });
+});

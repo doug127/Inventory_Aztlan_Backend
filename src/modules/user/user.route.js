@@ -14,6 +14,7 @@ import {
   listUsersController,
   unlockUserController,
   revokeUserSessionsController,
+  listUserSessionsController,
   updateUserController,
 } from './user.controller.js';
 
@@ -39,6 +40,7 @@ router.post('/:id/unlock', validate(byId), unlockUserController);
 router.post('/:id/force-password-reset', validate(byId), forcePasswordResetController);
 
 // HU-109 (desde la ficha del usuario)
+router.get('/:id/sessions', validate(byId), listUserSessionsController);
 router.post('/:id/revoke-sessions', validate(byId), revokeUserSessionsController);
 
 export default router;

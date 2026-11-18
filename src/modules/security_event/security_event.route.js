@@ -8,8 +8,9 @@ import { listEventTypesController, listSecurityEventsController } from './securi
 
 const router = Router();
 
-// Bitácora de seguridad (HU-110): solo lectura, ADMIN como mínimo (business_rules.md §8.2).
-router.use(auth, authorizeRole(ROLE_CODES.ADMIN));
+// Bitácora de seguridad (HU-110): solo lectura y solo para el SUPERADMIN (decisión del 2026-11-17;
+// business_rules.md §8.2 se debe actualizar: antes también la veía el ADMIN).
+router.use(auth, authorizeRole(ROLE_CODES.SUPERADMIN));
 
 router.get('/', validate(ListSecurityEventsQuerySchema, 'query'), listSecurityEventsController);
 router.get('/event-types', listEventTypesController);

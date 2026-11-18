@@ -248,3 +248,9 @@ export const revokeUserSessions = async (actor, id, context = {}) => {
   if (!result) throw new AppError('NOT_FOUND', { message: `Usuario ${id} no encontrado` });
   return { user: toUserDto(target), revokedSessions: result.revokedSessions };
 };
+
+/** Sesiones activas de un usuario (dispositivo, IP y última actividad), para su ficha. */
+export const listUserSessions = async (actor, id) => {
+  const target = await findManageableUser(actor, id);
+  return authService.listUserSessions(target.id);
+};
