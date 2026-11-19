@@ -2,24 +2,33 @@ import { Router } from 'express';
 import { auth } from '#src/shared/middlewares/auth.middleware.js';
 import { authorizeRole } from '#src/shared/middlewares/authorize.middleware.js';
 import { validate } from '#src/shared/middlewares/validate.middleware.js';
-import { 
-    getAllProductsController, 
-    getProductByIdController,
-    getAllByFilterProductsController,
-    createProductController,
-    updateProductController,
-    deleteProductController
+import { ROLE_CODES } from '#src/shared/constants/roles.js';
+import { CreateProductSchema, ListProductsQuerySchema, NextCodeQuerySchema, ProductIdParamsSchema, UpdateProductSchema } from './product.schema.js';
+import {
+  activateProductController,
+  createProductController,
+  deactivateProductController,
+  getNextCodeController,
+  getProductController,
+  listProductsController,
+  updateProductController,
 } from './product.controller.js';
-import { ProductSchema } from './product.schema.js';
-import { ROLE_NAMES } from '#src/shared/constants/ROLE_NAMES.js';
 
 const router = Router();
+const byId = { params: ProductIdParamsSchema };
+const admin = authorizeRole(ROLE_CODES.ADMIN);
 
-router.get('/', auth, authorizeRole(ROLE_NAMES.USER), getAllProductsController);
-router.get('/filter', auth, authorizeRole(ROLE_NAMES.USER), getAllByFilterProductsController);
-router.get('/:id', auth, authorizeRole(ROLE_NAMES.USER), getProductByIdController);
-router.post('/create', auth, authorizeRole(ROLE_NAMES.ADMIN), validate(ProductSchema), createProductController);
-router.put('/update/:id', auth, authorizeRole(ROLE_NAMES.ADMIN), validate(ProductSchema), updateProductController);
-router.delete('/delete/:id', auth, authorizeRole(ROLE_NAMES.SUPERADMIN), deleteProductController);
+// HU-204. Consultar: todos los roles. Crear, editar y desactivar: ADMIN o superior.
+// No hay borrado: los productos se desactivan (business_rules.md P8).
+router.use(auth);
+
+router.get('/', validate(ListProductsQuerySchema, 'query'), listProductsController);
+// Antes de /:id para que "next-code" no se lea como id. Solo lo usa el formulario de alta.
+router.get('/next-code', admin, validate(NextCodeQuerySchema, 'query'), getNextCodeController);
+router.get('/:id', validate(byId), getProductController);
+router.post('/', admin, validate(CreateProductSchema), createProductController);
+router.patch('/:id', admin, validate({ ...byId, body: UpdateProductSchema }), updateProductController);
+router.post('/:id/deactivate', admin, validate(byId), deactivateProductController);
+router.post('/:id/activate', admin, validate(byId), activateProductController);
 
 export default router;

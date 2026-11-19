@@ -225,3 +225,22 @@ export const convert = async ({ from, to, quantity }) => {
     text: `${normalizeDecimal(quantity)} ${fromUnit.code} = ${normalizeDecimal(result)} ${toUnit.code}`,
   };
 };
+
+/**
+ * Para el service de productos (HU-204): la unidad existe y está activa, y queda bloqueada FOR
+ * SHARE hasta el fin de la transacción para que no se desactive mientras se registra el producto.
+ */
+export const assertUnitAvailable = async (id, { transaction }) => {
+  const unit = await unitRepository.findUnitById(id, { transaction, lock: 'share' });
+  if (!unit) {
+    const message = `La unidad ${id} no existe`;
+    throw new AppError('VALIDATION_ERROR', { message, details: [{ location: 'body', path: 'unitId', message }] });
+  }
+  if (!unit.isActive) {
+    throw new AppError('INACTIVE_RESOURCE', {
+      message: `La unidad ${unit.code} está desactivada: no puede asignarse a productos`,
+      details: [{ location: 'body', path: 'unitId', message: `${unit.code} está desactivada` }],
+    });
+  }
+  return unit;
+};

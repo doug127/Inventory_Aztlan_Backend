@@ -1,65 +1,33 @@
-import {
-    getAllProductsService,
-    getProductByIdService,
-    getAllByFilterProductsService,
-    createProductService,
-    updateProductService,
-    deleteProductService
-} from './product.service.js';
+import * as productService from './product.service.js';
+import { addLogContext, sendCreated, sendOk, sendPaginated } from '#src/shared/http/response.js';
 
-export const getAllProductsController = async (req, res) => {   
-    try {
-        const products = await getAllProductsService();
-        res.status(200).json(products);
-    } catch (error) {
-        res.status(500).json({ message: error.message });
-    }   
-};
+// Sin try/catch: Express 5 lleva cualquier error de una función async al errorHandler.
 
-export const getProductByIdController = async (req, res) => {
-    try {
-        const { id } = req.params;
-        const product = await getProductByIdService(id);
-        res.status(200).json(product);
-    } catch (error) {
-        res.status(404).json({ message: error.message });
-    }
-};
+export const listProductsController = async (req, res) => sendPaginated(res, await productService.listProducts(req.validated.query));
 
-export const getAllByFilterProductsController = async (req, res) => {
-    try {
-        const products = await getAllByFilterProductsService(req.query);
-        res.status(200).json(products);
-    } catch (error) {
-        res.status(400).json({ message: error.message });
-    }
-};
+export const getNextCodeController = async (req, res) => sendOk(res, await productService.getNextCode(req.validated.query));
+
+export const getProductController = async (req, res) => sendOk(res, await productService.getProduct(req.validated.params.id));
 
 export const createProductController = async (req, res) => {
-    try {
-        const createdProduct = await createProductService(req.validatedData);
-        res.status(201).json(createdProduct);
-    } catch (error) {
-        res.status(400).json({ message: error.message });
-    }
+  const product = await productService.createProduct(req.validated.body);
+  addLogContext(res, { created: product.code });
+  return sendCreated(res, product);
 };
 
 export const updateProductController = async (req, res) => {
-    try {
-        const { id } = req.params;
-        const updatedProduct = await updateProductService(id, req.validatedData);
-        res.status(200).json(updatedProduct);
-    } catch (error) {
-        res.status(400).json({ message: error.message });
-    }
+  addLogContext(res, { target: req.validated.params.id, fields: Object.keys(req.validated.body).join(',') });
+  return sendOk(res, await productService.updateProduct(req.validated.params.id, req.validated.body));
 };
 
-export const deleteProductController = async (req, res) => {
-    try {
-        const { id } = req.params;
-        await deleteProductService(id);
-        res.status(204).send();
-    } catch (error) {
-        res.status(400).json({ message: error.message });
-    }
+export const deactivateProductController = async (req, res) => {
+  const product = await productService.deactivateProduct(req.validated.params.id);
+  addLogContext(res, { target: product.code });
+  return sendOk(res, product);
+};
+
+export const activateProductController = async (req, res) => {
+  const product = await productService.activateProduct(req.validated.params.id);
+  addLogContext(res, { target: product.code });
+  return sendOk(res, product);
 };

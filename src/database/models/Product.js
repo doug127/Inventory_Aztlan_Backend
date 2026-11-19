@@ -1,70 +1,18 @@
-import { DataTypes } from "sequelize";
-import { sequelize } from "#src/config/database.js";
+import { DataTypes } from 'sequelize';
+import { sequelize } from '#src/config/database.js';
 
-export const Product = sequelize.define("products", {
-    id: {
-        type: DataTypes.INTEGER,
-        primaryKey: true,
-        autoIncrement: true,
-        allowNull: false
-    }, 
-    name: {
-        type: DataTypes.STRING,
-        allowNull: false,
-    },
-    code: {
-        type: DataTypes.STRING,
-        allowNull: false,
-        unique: true
-    },  
-    content_quantity: {
-        type: DataTypes.FLOAT,
-        allowNull: false,
-        defaultValue: 1
-    },
-    min_stock: {
-        type: DataTypes.FLOAT,
-        allowNull: false,
-        defaultValue: 0
-    },
-    max_stock: {    
-        type: DataTypes.FLOAT,
-        allowNull: true,
-        defaultValue: null
-    },
-    is_active: {
-        type: DataTypes.BOOLEAN,
-        allowNull: false,
-        defaultValue: true
-    },
-    product_category_id: {
-        type: DataTypes.INTEGER,
-        allowNull: false,
-        references: {
-            model: 'category_products',
-            key: 'id'
-        },
-        onUpdate: 'CASCADE',
-        onDelete: 'RESTRICT'
-    },
-    unit_id: {
-        type: DataTypes.INTEGER,
-        allowNull: false,
-        references: {
-            model: 'units',
-            key: 'id'
-        },
-        onUpdate: 'CASCADE',
-        onDelete: 'RESTRICT'
-    },
-    createdAt: {
-        type: DataTypes.DATE,   
-        allowNull: false,
-        defaultValue: DataTypes.NOW
-    },
-    updatedAt: {
-        type: DataTypes.DATE,
-        allowNull: false,
-        defaultValue: DataTypes.NOW
-    }
+// Tabla products (db_schema.md §3). El código es {código de categoría}-{NNNN} (chk_products_code).
+// min_stock y max_stock son NUMERIC(14,3): pg los devuelve como string y se operan con decimal.js.
+export const Product = sequelize.define('Product', {
+  id: { type: DataTypes.INTEGER, primaryKey: true, autoIncrement: true },
+  code: { type: DataTypes.STRING(30), allowNull: false, unique: true },
+  name: { type: DataTypes.STRING(150), allowNull: false },
+  productCategoryId: { type: DataTypes.INTEGER, allowNull: false },
+  unitId: { type: DataTypes.INTEGER, allowNull: false },
+  minStock: { type: DataTypes.DECIMAL(14, 3), allowNull: false, defaultValue: 0 },
+  maxStock: { type: DataTypes.DECIMAL(14, 3), allowNull: true },
+  isActive: { type: DataTypes.BOOLEAN, allowNull: false, defaultValue: true },
+}, {
+  tableName: 'products',
+  underscored: true,
 });

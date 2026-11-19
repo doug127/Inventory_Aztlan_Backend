@@ -45,14 +45,17 @@ export const listUnits = async ({ page, limit, search, isActive, kind, baseUnitI
   return { items: rows.map(plain), total: count };
 };
 
-/** Con lock: true bloquea la fila (FOR UPDATE OF "Unit") y no calcula el uso. */
+/**
+ * Con lock: true (FOR UPDATE) se desactiva sin carreras; con lock: 'share' (FOR SHARE) quien crea
+ * un producto impide que la unidad se desactive mientras tanto. Con lock no se calcula el uso.
+ */
 export const findUnitById = async (id, { transaction, lock = false } = {}) =>
   plain(
     await Unit.findByPk(id, {
       attributes: lock ? undefined : { include: USAGE_ATTRIBUTES },
       include: lock ? [] : [BASE_INCLUDE],
       transaction,
-      lock: lock ? { level: Transaction.LOCK.UPDATE, of: Unit } : undefined,
+      lock: lock ? { level: lock === 'share' ? Transaction.LOCK.SHARE : Transaction.LOCK.UPDATE, of: Unit } : undefined,
     })
   );
 
@@ -90,6 +93,3 @@ export const countUsage = async (unitId, { transaction } = {}) => {
   );
   return usage;
 };
-
-// Compatibilidad: el módulo de productos anterior (pendiente de REF-S1) importa este nombre.
-export const getUnitByIdRepository = (id) => findUnitById(id);

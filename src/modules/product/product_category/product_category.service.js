@@ -233,11 +233,14 @@ export const activateCategory = async (id) => {
  */
 export const assertCategoryAvailable = async (id, { transaction }) => {
   const category = await categoryRepository.findCategoryById(id, { transaction, lock: 'share' });
-  if (!category) throw new AppError('NOT_FOUND', { message: `La categoría ${id} no existe` });
+  if (!category) {
+    const message = `La categoría ${id} no existe`;
+    throw new AppError('VALIDATION_ERROR', { message, details: [fieldIssue('categoryId', message)] });
+  }
   if (!category.isActive) {
     throw new AppError('INACTIVE_RESOURCE', {
       message: `La categoría ${category.code} está desactivada: no admite productos nuevos`,
-      details: { categoryCode: category.code },
+      details: [fieldIssue('categoryId', `${category.code} está desactivada`)],
     });
   }
   return category;

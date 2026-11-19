@@ -193,8 +193,11 @@ describe('deactivate / activate (regla 3)', () => {
 });
 
 describe('assertCategoryAvailable (para productos, HU-204)', () => {
-  it('inexistente → NOT_FOUND; inactiva → INACTIVE_RESOURCE; activa → bloqueada FOR SHARE', async () => {
-    await expect(service.assertCategoryAvailable(99, { transaction: 'tx' })).rejects.toMatchObject({ code: 'NOT_FOUND' });
+  it('inexistente → VALIDATION_ERROR en categoryId; inactiva → INACTIVE_RESOURCE; activa → bloqueada FOR SHARE', async () => {
+    await expect(service.assertCategoryAvailable(99, { transaction: 'tx' })).rejects.toMatchObject({
+      code: 'VALIDATION_ERROR',
+      details: [expect.objectContaining({ path: 'categoryId' })],
+    });
     await expect(service.assertCategoryAvailable(7, { transaction: 'tx' })).rejects.toMatchObject({ code: 'INACTIVE_RESOURCE' });
     await expect(service.assertCategoryAvailable(6, { transaction: 'tx' })).resolves.toMatchObject({ code: 'LUBR' });
     expect(repo.findCategoryById).toHaveBeenLastCalledWith(6, { transaction: 'tx', lock: 'share' });
