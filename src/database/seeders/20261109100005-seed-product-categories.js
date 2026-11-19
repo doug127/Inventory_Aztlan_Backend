@@ -1,13 +1,13 @@
 // Categorías de productos de naming_conventions.md §6.1
 export const up = async (queryInterface) => {
   await queryInterface.sequelize.query(`
-    INSERT INTO product_categories (code, name) VALUES
-      ('COMB', 'Combustibles'),
-      ('LUBR', 'Lubricantes'),
-      ('INSU', 'Insumos agrícolas'),
-      ('REPU', 'Repuestos'),
-      ('HERR', 'Herramientas'),
-      ('EPPS', 'Equipos de protección personal');
+    INSERT INTO product_categories (code, name, icon) VALUES
+      ('COMB', 'Combustibles', 'fuel'),
+      ('LUBR', 'Lubricantes', 'droplet'),
+      ('INSU', 'Insumos agrícolas', 'sprout'),
+      ('REPU', 'Repuestos', 'cog'),
+      ('HERR', 'Herramientas', 'wrench'),
+      ('EPPS', 'Equipos de protección personal', 'hard-hat');
 
     INSERT INTO product_categories (code, name, parent_id)
     SELECT v.code, v.name, p.id

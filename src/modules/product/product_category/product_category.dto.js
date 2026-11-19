@@ -14,6 +14,9 @@ export const CategoryDto = z.object({
   code: z.string(),
   name: z.string(),
   description: z.string().nullable(),
+  // Icono propio (solo las raíces) y el que se muestra (el de la raíz de su rama).
+  icon: z.string().nullable(),
+  displayIcon: z.string().nullable(),
   isActive: z.boolean(),
   parent: CategoryRefDto.nullable(),
   // Sin hijas. Los productos se asignan preferiblemente a categorías hoja (naming_conventions.md §6.1).
@@ -52,6 +55,8 @@ const baseFields = (category) => {
     code: category.code,
     name: category.name,
     description: category.description ?? null,
+    icon: category.icon ?? null,
+    displayIcon: category.displayIcon ?? category.rootIcon ?? category.icon ?? null,
     isActive: category.isActive,
     parent: category.parent ? toRef(category.parent) : null,
     isLeaf: usage.totalChildren === 0,
@@ -67,14 +72,14 @@ export const toCategoryDetailDto = (category, { path, children }) =>
   CategoryDetailDto.parse({ ...baseFields(category), path: path.map(toRef), children: children.map(toRef) });
 
 /**
- * roots: categorías planas anidadas, cada una con { depth, productsInSubtree, children }. Se valida
+ * roots: categorías anidadas por buildCategoryTree, cada una con { depth, subtreeCount, displayIcon, children }. Se valida
  * el árbol completo una sola vez.
  */
 export const toCategoryTreeDto = (roots) => {
   const shape = (node) => ({
     ...baseFields(node),
     depth: node.depth,
-    productsInSubtree: node.productsInSubtree,
+    productsInSubtree: node.subtreeCount,
     children: node.children.map(shape),
   });
   return z.array(CategoryTreeNodeDto).parse(roots.map(shape));

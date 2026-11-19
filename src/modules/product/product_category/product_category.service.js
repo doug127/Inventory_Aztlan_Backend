@@ -3,10 +3,12 @@
 //     descendientes (CTE recursivo). Los cambios de padre se serializan con un candado.
 //  2. El nombre es único dentro del mismo padre; el código (4 letras) es único en todo el catálogo.
 //  3. No se desactiva una categoría con hijas activas o con productos activos.
+// Solo las raíces llevan icono (HU-301); las subcategorías muestran el de su raíz.
 // El código es el prefijo de los productos (LUBR → LUBR-0001): no cambia si la categoría tiene productos.
 // Consultar es para todos los roles; crear, editar, mover y desactivar, para ADMIN o superior (lo exige la ruta).
 import { AppError } from '#src/shared/errors/AppError.js';
 import { withTransaction } from '#src/shared/db/transaction.js';
+import { buildCategoryTree, resolveCategoryIcon } from '#src/shared/utils/categoryTree.js';
 import * as categoryRepository from './product_category.repository.js';
 import { toCategoryDetailDto, toCategoryDto, toCategoryTreeDto } from './product_category.dto.js';
 
@@ -69,28 +71,6 @@ const assertNoCycle = async (category, parentId, { transaction }) => {
   throw new AppError('CATEGORY_CYCLE', { message, details: [fieldIssue('parentId', message)] });
 };
 
-/**
- * Arma el árbol en memoria a partir de la lista plana: O(n), sin una consulta por nivel.
- * Con isActive=true se omiten las ramas inactivas (una categoría inactiva no tiene hijas activas).
- */
-const buildTree = (rows, { isActive } = {}) => {
-  const childrenOf = new Map();
-  for (const row of rows) {
-    if (isActive !== undefined && row.isActive !== isActive) continue;
-    const key = row.parentId ?? null;
-    if (!childrenOf.has(key)) childrenOf.set(key, []);
-    childrenOf.get(key).push(row);
-  }
-  const visited = new Set();
-  const attach = (row, depth) => {
-    visited.add(row.id);
-    const children = (childrenOf.get(row.id) ?? []).filter((c) => !visited.has(c.id)).map((c) => attach(c, depth + 1));
-    const productsInSubtree = Number(row.totalProducts ?? 0) + children.reduce((sum, c) => sum + c.productsInSubtree, 0);
-    return { ...row, depth, children, productsInSubtree };
-  };
-  return (childrenOf.get(null) ?? []).map((root) => attach(root, 0));
-};
-
 // --- Consultas ---------------------------------------------------------------
 
 export const listCategories = async (query) => {
@@ -108,7 +88,8 @@ export const listCategories = async (query) => {
 };
 
 /** Árbol completo: raíces ordenadas por nombre, cada nodo con sus hijas en `children`. */
-export const getCategoryTree = async ({ isActive } = {}) => toCategoryTreeDto(buildTree(await categoryRepository.findAllCategories(), { isActive }));
+export const getCategoryTree = async ({ isActive } = {}) =>
+  toCategoryTreeDto(buildCategoryTree(await categoryRepository.findAllCategories(), { isActive, countOf: (row) => row.totalProducts }));
 
 /** Ficha: la categoría, su ruta desde la raíz y sus hijas directas. */
 export const getCategory = async (id) => {
@@ -129,12 +110,13 @@ export const getSubtreeIds = async (id, { transaction } = {}) => {
 
 // --- Alta, edición y estado ----------------------------------------------------
 
-export const createCategory = async ({ code, name, description, parentId }) => {
+export const createCategory = async ({ code, name, description, parentId, icon: requestedIcon }) => {
   assertCodeFormat(code);
+  const icon = resolveCategoryIcon({ requested: requestedIcon, parentId }) ?? null;
   const created = await withTransaction(async (transaction) => {
     if (parentId !== null) await assertParentAvailable(parentId, { transaction });
     await assertUniqueFields({ code, name, parentId }, { transaction });
-    return categoryRepository.createCategory({ code, name, description, parentId }, { transaction });
+    return categoryRepository.createCategory({ code, name, description, parentId, icon }, { transaction });
   });
   return toCategoryDto(await findCategoryOrFail(created.id));
 };
@@ -164,6 +146,9 @@ export const updateCategory = async (id, changes) => {
   const parentId = changes.parentId === undefined ? category.parentId : changes.parentId;
   const moves = parentId !== category.parentId;
   if (moves) update.parentId = parentId;
+
+  const icon = resolveCategoryIcon({ current: category.icon, requested: changes.icon, parentId });
+  if (icon !== undefined) update.icon = icon;
 
   if (!Object.keys(update).length) return toCategoryDto(category);
 

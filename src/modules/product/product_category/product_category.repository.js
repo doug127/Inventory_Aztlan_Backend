@@ -17,6 +17,16 @@ const USAGE_ATTRIBUTES = [
   [sequelize.literal('(SELECT count(*)::int FROM products p WHERE p.product_category_id = "ProductCategory".id)'), 'totalProducts'],
 ];
 
+// Icono de la raíz de su rama (solo las raíces lo guardan), para la lista y la ficha.
+const ROOT_ICON_ATTRIBUTE = [
+  sequelize.literal(`(WITH RECURSIVE up AS (
+     SELECT parent_id, icon, 0 AS distance FROM product_categories WHERE id = "ProductCategory".id
+     UNION ALL
+     SELECT c.parent_id, c.icon, up.distance + 1 FROM product_categories c JOIN up ON c.id = up.parent_id WHERE up.distance < 100
+   ) SELECT icon FROM up WHERE parent_id IS NULL LIMIT 1)`),
+  'rootIcon',
+];
+
 const SORT_COLUMNS = { code: ['code'], name: ['name'], createdAt: ['createdAt'] };
 
 const escapeLike = (text) => text.replace(/[\\%_]/g, (ch) => `\\${ch}`);
@@ -33,7 +43,7 @@ export const listCategories = async ({ page, limit, search, isActive, parentId, 
   }
   const { rows, count } = await ProductCategory.findAndCountAll({
     where: and.length ? { [Op.and]: and } : {},
-    attributes: { include: USAGE_ATTRIBUTES },
+    attributes: { include: [...USAGE_ATTRIBUTES, ROOT_ICON_ATTRIBUTE] },
     include: [PARENT_INCLUDE],
     order: [[...SORT_COLUMNS[sort], order === 'desc' ? 'DESC' : 'ASC'], ['id', 'ASC']],
     limit,
@@ -61,7 +71,7 @@ export const findAllCategories = async () =>
 export const findCategoryById = async (id, { transaction, lock } = {}) =>
   plain(
     await ProductCategory.findByPk(id, {
-      attributes: lock ? undefined : { include: USAGE_ATTRIBUTES },
+      attributes: lock ? undefined : { include: [...USAGE_ATTRIBUTES, ROOT_ICON_ATTRIBUTE] },
       include: lock ? [] : [PARENT_INCLUDE],
       transaction,
       lock: lock ? { level: lock === 'share' ? Transaction.LOCK.SHARE : Transaction.LOCK.UPDATE, of: ProductCategory } : undefined,

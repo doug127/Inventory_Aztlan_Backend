@@ -1,11 +1,12 @@
-// Árbol de categorías de activos de naming_conventions.md §7.1, insertado por niveles
+// Árbol de categorías de activos de naming_conventions.md §7.1, insertado por niveles.
+// Las raíces llevan su icono (HU-301); las subcategorías muestran el de su raíz.
 const LEVELS = [
   [
-    ['VEHICULOS', 'Vehículos', null],
-    ['PERSONAL', 'Personal', null],
-    ['CAMPO', 'Campo', null],
-    ['TALLER', 'Taller', null],
-    ['EXTERNO', 'Externo', null],
+    ['VEHICULOS', 'Vehículos', null, 'tractor'],
+    ['PERSONAL', 'Personal', null, 'users'],
+    ['CAMPO', 'Campo', null, 'wheat'],
+    ['TALLER', 'Taller', null, 'warehouse'],
+    ['EXTERNO', 'Externo', null, 'handshake'],
   ],
   [
     ['MAQUINARIA_AGRICOLA', 'Maquinaria agrícola', 'VEHICULOS'],
@@ -26,11 +27,11 @@ const LEVELS = [
 
 export const up = async (queryInterface) => {
   for (const level of LEVELS) {
-    for (const [code, name, parentCode] of level) {
+    for (const [code, name, parentCode, icon = null] of level) {
       await queryInterface.sequelize.query(
-        `INSERT INTO asset_categories (code, name, parent_id)
-         VALUES (:code, :name, (SELECT id FROM asset_categories WHERE code = :parentCode));`,
-        { replacements: { code, name, parentCode } }
+        `INSERT INTO asset_categories (code, name, parent_id, icon)
+         VALUES (:code, :name, (SELECT id FROM asset_categories WHERE code = :parentCode), :icon);`,
+        { replacements: { code, name, parentCode, icon } }
       );
     }
   }

@@ -10,6 +10,7 @@ import {MovementType} from './MovementType.js';
 import {Reason} from './Reason.js';
 import {MovementHeader} from './MovementHeader.js';
 import {MovementLine} from './MovementLine.js';
+import {AssetCategory} from './AssetCategory.js';
 import {AssetType} from './AssetType.js';
 import {Asset} from './Asset.js';
 import {MovementTarget} from './MovementTarget.js';
@@ -100,7 +101,11 @@ MovementLine.belongsTo(Product, {
     as: 'product'
 });
 
-// * Relación uno a muchos entre AssetType y Asset
+// * Categorías de activos: árbol (padre / hijas). Los activos (HU-302) se asocian al migrar ese módulo.
+AssetCategory.belongsTo(AssetCategory, { foreignKey: 'parentId', as: 'parent' });
+AssetCategory.hasMany(AssetCategory, { foreignKey: 'parentId', as: 'children' });
+
+// * Relación uno a muchos entre AssetType y Asset (esquema anterior, se reemplaza en HU-302)
 AssetType.hasMany(Asset, { foreignKey: 'asset_type_id' });
 Asset.belongsTo(AssetType, { 
     foreignKey: 'asset_type_id',
@@ -134,6 +139,7 @@ export {
   Reason,
   MovementHeader,
   MovementLine,
+  AssetCategory,
   AssetType,
   Asset,
   MovementTarget,

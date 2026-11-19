@@ -9,6 +9,8 @@ export const ProductCategory = sequelize.define('ProductCategory', {
   name: { type: DataTypes.STRING(100), allowNull: false },
   description: { type: DataTypes.TEXT, allowNull: true },
   parentId: { type: DataTypes.INTEGER, allowNull: true },
+  // Icono de lucide (HU-301). Solo en las raíces; las subcategorías muestran el de su raíz.
+  icon: { type: DataTypes.STRING(40), allowNull: true },
   isActive: { type: DataTypes.BOOLEAN, allowNull: false, defaultValue: true },
 }, {
   tableName: 'product_categories',

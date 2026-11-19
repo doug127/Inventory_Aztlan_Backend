@@ -1,4 +1,5 @@
 import { z } from 'zod';
+import { CATEGORY_ICONS } from '#src/shared/constants/icons.js';
 
 // Entrada de categorías de productos (HU-203). El formato del código (4 letras) lo valida el
 // service, para responder con INVALID_CODE_FORMAT del catálogo de errores.
@@ -25,6 +26,9 @@ const descriptionField = z
   .nullable()
   .transform((value) => value || null);
 
+// Icono de lucide del catálogo. Solo para categorías raíz (lo valida el service); null lo quita.
+const iconField = z.enum(CATEGORY_ICONS, { error: 'El icono no está en el catálogo de iconos' }).nullable();
+
 const idField = (name) =>
   z.number({ error: `${name} debe ser un número o null` }).int(`${name} debe ser un entero`).positive(`${name} debe ser positivo`);
 
@@ -39,6 +43,7 @@ export const CreateCategorySchema = z
     name: nameField,
     description: descriptionField.optional().default(null),
     parentId: idField('parentId').nullable().optional().default(null),
+    icon: iconField.optional().default(null),
   })
   .strict();
 
@@ -49,10 +54,11 @@ export const UpdateCategorySchema = z
     name: nameField.optional(),
     description: descriptionField.optional(),
     parentId: idField('parentId').nullable().optional(),
+    icon: iconField.optional(),
   })
   .strict()
   .refine((body) => Object.values(body).some((v) => v !== undefined), {
-    error: 'Indique al menos un campo para modificar (code, name, description o parentId)',
+    error: 'Indique al menos un campo para modificar (code, name, description, parentId o icon)',
   });
 
 const booleanQuery = (name) =>

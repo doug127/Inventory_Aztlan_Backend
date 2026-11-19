@@ -37,7 +37,7 @@ const cat = (id, code, name, parentId = null, overrides = {}) => ({
 });
 
 // INSU › FERT › FOLI (foliares); REPU › FILT; LUBR con 2 productos.
-const INSU = cat(1, 'INSU', 'Insumos agrícolas', null, { activeChildren: 1, totalChildren: 1 });
+const INSU = cat(1, 'INSU', 'Insumos agrícolas', null, { activeChildren: 1, totalChildren: 1, icon: 'sprout' });
 const FERT = cat(2, 'FERT', 'Fertilizantes', 1, { parent: { id: 1, code: 'INSU', name: 'Insumos agrícolas', isActive: true }, totalChildren: 1, activeChildren: 1 });
 const FOLI = cat(3, 'FOLI', 'Foliares', 2, { parent: { id: 2, code: 'FERT', name: 'Fertilizantes', isActive: true } });
 const REPU = cat(4, 'REPU', 'Repuestos', null, { totalChildren: 1, activeChildren: 1 });
@@ -79,7 +79,7 @@ describe('createCategory', () => {
   it('crea una subcategoría bajo un padre activo, bloqueado FOR SHARE', async () => {
     await service.createCategory({ code: 'FOLI', name: 'Foliares', description: null, parentId: 2 });
     expect(repo.findCategoryById).toHaveBeenCalledWith(2, { transaction: 'tx', lock: 'share' });
-    expect(repo.createCategory).toHaveBeenCalledWith({ code: 'FOLI', name: 'Foliares', description: null, parentId: 2 }, { transaction: 'tx' });
+    expect(repo.createCategory).toHaveBeenCalledWith({ code: 'FOLI', name: 'Foliares', description: null, parentId: 2, icon: null }, { transaction: 'tx' });
   });
 
   it('código que no son 4 letras → INVALID_CODE_FORMAT', async () => {
@@ -189,6 +189,35 @@ describe('deactivate / activate (regla 3)', () => {
     await expect(service.activateCategory(8)).rejects.toMatchObject({ code: 'INACTIVE_RESOURCE' });
     await service.activateCategory(7);
     expect(repo.updateCategory).toHaveBeenCalledWith(7, { isActive: true });
+  });
+});
+
+describe('iconos (HU-301: solo en las raíces)', () => {
+  it('el árbol muestra en cada subcategoría el icono de su raíz', async () => {
+    repo.findAllCategories.mockResolvedValue(Object.values(ALL));
+    const insu = (await service.getCategoryTree()).find((n) => n.code === 'INSU');
+    expect(insu).toMatchObject({ icon: 'sprout', displayIcon: 'sprout' });
+    expect(insu.children[0]).toMatchObject({ code: 'FERT', icon: null, displayIcon: 'sprout' });
+    expect(insu.children[0].children[0]).toMatchObject({ code: 'FOLI', displayIcon: 'sprout' });
+  });
+
+  it('una raíz se crea con icono; una subcategoría con icono → VALIDATION_ERROR en icon', async () => {
+    await service.createCategory({ code: 'SEMI', name: 'Semillas', description: null, parentId: null, icon: 'wheat' });
+    expect(repo.createCategory).toHaveBeenCalledWith(expect.objectContaining({ icon: 'wheat' }), { transaction: 'tx' });
+
+    await expect(service.createCategory({ code: 'FOLI', name: 'Foliares', description: null, parentId: 2, icon: 'leaf' })).rejects.toMatchObject({
+      code: 'VALIDATION_ERROR',
+      details: [expect.objectContaining({ path: 'icon' })],
+    });
+    expect(repo.createCategory).toHaveBeenCalledTimes(1);
+  });
+
+  it('cambia el icono de una raíz y lo borra al moverla dentro de otra', async () => {
+    await service.updateCategory(1, { icon: 'leaf' });
+    expect(repo.updateCategory).toHaveBeenLastCalledWith(1, { icon: 'leaf' }, { transaction: 'tx' });
+
+    await service.updateCategory(1, { parentId: 6 });
+    expect(repo.updateCategory).toHaveBeenLastCalledWith(1, { parentId: 6, icon: null }, { transaction: 'tx' });
   });
 });
 
