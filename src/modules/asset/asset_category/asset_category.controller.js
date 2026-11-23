@@ -11,7 +11,13 @@ export const getCategoryTreeController = async (req, res) => {
   return sendOk(res, tree);
 };
 
-export const getCategoryController = async (req, res) => sendOk(res, await assetCategoryService.getCategory(req.validated.params.id));
+export const countAssetsController = async (req, res) => {
+  const result = await assetCategoryService.countAssets(req.validated.query);
+  addLogContext(res, { category: result.category?.code ?? 'ALL', assets: result.assets.total });
+  return sendOk(res, result);
+};
+
+export const getCategoryController =async (req, res) => sendOk(res, await assetCategoryService.getCategory(req.validated.params.id));
 
 export const createCategoryController = async (req, res) => {
   const category = await assetCategoryService.createCategory(req.validated.body);

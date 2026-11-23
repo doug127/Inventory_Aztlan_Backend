@@ -101,17 +101,14 @@ MovementLine.belongsTo(Product, {
     as: 'product'
 });
 
-// * Categorías de activos: árbol (padre / hijas). Los activos (HU-302) se asocian al migrar ese módulo.
+// * Categorías de activos: árbol (padre / hijas) y sus activos (solo en las hojas).
 AssetCategory.belongsTo(AssetCategory, { foreignKey: 'parentId', as: 'parent' });
 AssetCategory.hasMany(AssetCategory, { foreignKey: 'parentId', as: 'children' });
+AssetCategory.hasMany(Asset, { foreignKey: 'assetCategoryId', as: 'assets' });
+Asset.belongsTo(AssetCategory, { foreignKey: 'assetCategoryId', as: 'category' });
 
-// * Relación uno a muchos entre AssetType y Asset (esquema anterior, se reemplaza en HU-302)
-AssetType.hasMany(Asset, { foreignKey: 'asset_type_id' });
-Asset.belongsTo(AssetType, { 
-    foreignKey: 'asset_type_id',
-    as: 'asset_type'
-});
-
+// AssetType y MovementTarget son del esquema anterior: los importa el módulo de movimientos
+// heredado hasta que se reescriba en HU-401 (sus tablas ya no existen).
 // * Relación uno a muchos entre MovementHeader y MovementTarget
 MovementHeader.hasMany(MovementTarget, { 
     foreignKey: 'movement_header_id',

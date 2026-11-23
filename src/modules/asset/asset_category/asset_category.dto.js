@@ -72,6 +72,43 @@ export const toAssetCategoryDto = (category) => AssetCategoryDto.parse(baseField
 export const toAssetCategoryDetailDto = (category, { path, children }) =>
   AssetCategoryDetailDto.parse({ ...baseFields(category), path: path.map(toRef), children: children.map(toRef) });
 
+// --- Conteo de activos por categoría (HU-303) -----------------------------------
+
+const AssetTotalsDto = z.object({ active: z.number().int(), inactive: z.number().int(), total: z.number().int() });
+
+const AssetCountGroupDto = CategoryRefDto.extend({
+  displayIcon: z.string().nullable(),
+  isLeaf: z.boolean(),
+  assets: AssetTotalsDto,
+});
+
+/**
+ * category null: el resumen de toda la finca, con una fila por raíz. Con categoría: los activos de
+ * su rama y una fila por subcategoría directa (vacío si es hoja).
+ */
+export const AssetCountDto = z.object({
+  category: CategoryRefDto.extend({ displayIcon: z.string().nullable(), isLeaf: z.boolean(), path: z.array(CategoryRefDto) }).nullable(),
+  assets: AssetTotalsDto,
+  breakdown: z.array(AssetCountGroupDto),
+});
+
+const totalsOf = ({ active = 0, inactive = 0 } = {}) => ({ active, inactive, total: active + inactive });
+
+/** counts: { active, inactive } por id de categoría, ya sumados por rama. */
+export const toAssetCountDto = ({ category, path, groups, counts }) => {
+  const displayIcon = (c) => c.rootIcon ?? c.icon ?? null;
+  const isLeaf = (c) => Number(c.totalChildren ?? 0) === 0;
+  const breakdown = groups.map((g) => ({ ...toRef(g), displayIcon: displayIcon(g), isLeaf: isLeaf(g), assets: totalsOf(counts.get(g.id)) }));
+  const assets = category
+    ? totalsOf(counts.get(category.id))
+    : totalsOf(breakdown.reduce((sum, g) => ({ active: sum.active + g.assets.active, inactive: sum.inactive + g.assets.inactive }), { active: 0, inactive: 0 }));
+  return AssetCountDto.parse({
+    category: category ? { ...toRef(category), displayIcon: displayIcon(category), isLeaf: isLeaf(category), path: path.map(toRef) } : null,
+    assets,
+    breakdown,
+  });
+};
+
 /** roots: categorías anidadas por buildCategoryTree. Se valida el árbol completo una sola vez. */
 export const toAssetCategoryTreeDto = (roots) => {
   const shape = (node) => ({

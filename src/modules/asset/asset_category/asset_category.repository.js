@@ -26,7 +26,9 @@ const ROOT_ICON_ATTRIBUTE = [
   'rootIcon',
 ];
 
-const SORT_COLUMNS = { code: ['code'], name: ['name'], createdAt: ['createdAt'] };
+// Orden natural (migración 20261122000001): "Lote 2" antes que "Lote 10".
+const naturalName = sequelize.literal('"AssetCategory"."name" COLLATE natural_sort');
+const SORT_COLUMNS = { code: [sequelize.literal('"AssetCategory"."code" COLLATE natural_sort')], name: [naturalName], createdAt: ['createdAt'] };
 
 const escapeLike = (text) => text.replace(/[\\%_]/g, (ch) => `\\${ch}`);
 
@@ -62,7 +64,7 @@ export const findAllCategories = async () =>
     await AssetCategory.findAll({
       attributes: { include: USAGE_ATTRIBUTES },
       include: [PARENT_INCLUDE],
-      order: [['name', 'ASC'], ['id', 'ASC']],
+      order: [[naturalName, 'ASC'], ['id', 'ASC']],
     })
   ).map(plain);
 
@@ -87,7 +89,7 @@ export const findChildren = async (parentId) =>
     await AssetCategory.findAll({
       where: { parentId },
       attributes: ['id', 'code', 'name', 'isActive'],
-      order: [['name', 'ASC']],
+      order: [[naturalName, 'ASC']],
     })
   ).map(plain);
 
@@ -121,6 +123,49 @@ export const findSubtreeIds = async (id, { transaction } = {}) => {
     { replacements: { id }, type: QueryTypes.SELECT, transaction }
   );
   return rows.map((row) => row.id);
+};
+
+/** Por código (LINEA_AMARILLA), para el conteo que pide el asistente (count_assets). */
+export const findCategoryByCode = async (code) =>
+  plain(
+    await AssetCategory.findOne({
+      where: { code },
+      attributes: { include: [...USAGE_ATTRIBUTES, ROOT_ICON_ATTRIBUTE] },
+      include: [PARENT_INCLUDE],
+    })
+  );
+
+/** Hijas directas de parentId (o las raíces con null) con su uso, para el desglose del conteo (HU-303). */
+export const findChildCategories = async (parentId) =>
+  (
+    await AssetCategory.findAll({
+      where: { parentId },
+      attributes: { include: [...USAGE_ATTRIBUTES, ROOT_ICON_ATTRIBUTE] },
+      order: [[naturalName, 'ASC'], ['id', 'ASC']],
+    })
+  ).map(plain);
+
+/**
+ * Activos activos e inactivos de cada categoría indicada contando toda su rama (HU-303): VEHICULOS
+ * suma los de MAQUINARIA_AGRICOLA, LINEA_AMARILLA y TRANSPORTE. Una sola consulta para todos los ids.
+ */
+export const countAssetsInSubtrees = async (ids, { transaction } = {}) => {
+  if (!ids.length) return [];
+  return sequelize.query(
+    `WITH RECURSIVE down AS (
+       SELECT id AS top_id, id, 0 AS depth FROM asset_categories WHERE id IN (:ids)
+       UNION ALL
+       SELECT down.top_id, c.id, down.depth + 1
+       FROM asset_categories c JOIN down ON c.parent_id = down.id
+       WHERE down.depth < 100
+     )
+     SELECT down.top_id AS "categoryId",
+            count(a.id) FILTER (WHERE a.is_active)::int AS "active",
+            count(a.id) FILTER (WHERE NOT a.is_active)::int AS "inactive"
+     FROM down LEFT JOIN assets a ON a.asset_category_id = down.id
+     GROUP BY down.top_id`,
+    { replacements: { ids }, type: QueryTypes.SELECT, transaction }
+  );
 };
 
 /** Código único en todo el catálogo y nombre único dentro del mismo padre, sin distinguir mayúsculas. */

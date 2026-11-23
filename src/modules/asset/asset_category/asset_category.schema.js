@@ -74,6 +74,14 @@ export const ListAssetCategoriesQuerySchema = z
   })
   .refine((q) => !(q.root && q.parentId), { error: 'Use root=true o parentId, no ambos', path: ['root'] });
 
+/** HU-303. categoryId (la UI) o code (el asistente); sin ninguno, el resumen por raíz. */
+export const AssetCountQuerySchema = z
+  .object({
+    categoryId: z.coerce.number().int('categoryId debe ser un entero').positive('categoryId debe ser positivo').optional(),
+    code: codeField.optional(),
+  })
+  .refine((q) => !(q.categoryId !== undefined && q.code !== undefined), { error: 'Use categoryId o code, no ambos', path: ['code'] });
+
 export const AssetCategoryTreeQuerySchema = z.object({
   // Con isActive=true el árbol omite las ramas inactivas (para los selectores).
   isActive: booleanQuery('isActive'),

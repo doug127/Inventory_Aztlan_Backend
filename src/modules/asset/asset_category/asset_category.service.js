@@ -11,7 +11,7 @@ import { AppError } from '#src/shared/errors/AppError.js';
 import { withTransaction } from '#src/shared/db/transaction.js';
 import { buildCategoryTree, resolveCategoryIcon } from '#src/shared/utils/categoryTree.js';
 import * as categoryRepository from './asset_category.repository.js';
-import { toAssetCategoryDetailDto, toAssetCategoryDto, toAssetCategoryTreeDto } from './asset_category.dto.js';
+import { toAssetCategoryDetailDto, toAssetCategoryDto, toAssetCategoryTreeDto, toAssetCountDto } from './asset_category.dto.js';
 
 export const ASSET_CATEGORY_CODE_PATTERN = /^[A-Z][A-Z0-9_]{1,19}$/;
 
@@ -102,6 +102,28 @@ export const getCategory = async (id) => {
   const category = await findCategoryOrFail(id);
   const [path, children] = await Promise.all([categoryRepository.findAncestors(id), categoryRepository.findChildren(id)]);
   return toAssetCategoryDetailDto(category, { path, children });
+};
+
+/**
+ * Cuántos activos hay en una categoría contando todas sus subcategorías (HU-303), con el desglose
+ * por subcategoría directa. Sin categoría, el resumen de la finca por raíz. Se identifica por id
+ * (la UI) o por código (el asistente, count_assets con asset_category_code).
+ */
+export const countAssets = async ({ categoryId, code } = {}) => {
+  let category = null;
+  if (categoryId !== undefined) category = await findCategoryOrFail(categoryId);
+  else if (code !== undefined) {
+    category = await categoryRepository.findCategoryByCode(code);
+    if (!category) throw new AppError('NOT_FOUND', { message: `No existe la categoría de activos ${code}` });
+  }
+
+  const [groups, path] = await Promise.all([
+    categoryRepository.findChildCategories(category?.id ?? null),
+    category ? categoryRepository.findAncestors(category.id) : [],
+  ]);
+  const ids = [...(category ? [category.id] : []), ...groups.map((g) => g.id)];
+  const counts = new Map((await categoryRepository.countAssetsInSubtrees(ids)).map((row) => [row.categoryId, row]));
+  return toAssetCountDto({ category, path, groups, counts });
 };
 
 /**

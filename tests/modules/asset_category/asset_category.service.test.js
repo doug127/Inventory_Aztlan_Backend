@@ -13,6 +13,9 @@ vi.mock('#src/modules/asset/asset_category/asset_category.repository.js', () => 
   updateCategory: vi.fn(),
   countDependencies: vi.fn(),
   lockTreeForMove: vi.fn(),
+  findCategoryByCode: vi.fn(),
+  findChildCategories: vi.fn(),
+  countAssetsInSubtrees: vi.fn(),
 }));
 vi.mock('#src/shared/db/transaction.js', () => ({ withTransaction: (fn) => fn('tx') }));
 
@@ -191,5 +194,51 @@ describe('assertLeafCategoryAvailable (para activos, HU-302)', () => {
     await expect(service.assertLeafCategoryAvailable(7, { transaction: 'tx' })).rejects.toMatchObject({ code: 'INACTIVE_RESOURCE' });
     await expect(service.assertLeafCategoryAvailable(3, { transaction: 'tx' })).resolves.toMatchObject({ code: 'TRACTOR' });
     expect(repo.findCategoryById).toHaveBeenLastCalledWith(3, { transaction: 'tx', lock: 'share' });
+  });
+});
+
+describe('countAssets (HU-303)', () => {
+  // Activos por rama: TRACTOR 2 (+1 inactivo), CAMPO 2, PERSONAL 3.
+  const BRANCH = { 1: { active: 2, inactive: 1 }, 2: { active: 2, inactive: 1 }, 3: { active: 2, inactive: 1 }, 4: { active: 2, inactive: 0 }, 6: { active: 3, inactive: 0 } };
+  const CHILDREN = { null: [CAMPO, PERSONAL, VEHICULOS], 1: [MAQUINARIA], 2: [TRACTOR], 3: [] };
+
+  beforeEach(() => {
+    repo.findChildCategories.mockImplementation(async (parentId) => CHILDREN[parentId] ?? []);
+    repo.countAssetsInSubtrees.mockImplementation(async (ids) => ids.filter((id) => BRANCH[id]).map((id) => ({ categoryId: id, ...BRANCH[id] })));
+    repo.findAncestors.mockResolvedValue([]);
+    repo.findCategoryByCode.mockImplementation(async (code) => Object.values(ALL).find((c) => c.code === code) ?? null);
+  });
+
+  it('VEHICULOS suma toda su rama y desglosa por subcategoría directa, con una sola consulta de conteo', async () => {
+    const result = await service.countAssets({ categoryId: 1 });
+    expect(result.category).toMatchObject({ code: 'VEHICULOS', isLeaf: false, displayIcon: 'tractor', path: [] });
+    expect(result.assets).toEqual({ active: 2, inactive: 1, total: 3 });
+    expect(result.breakdown).toEqual([
+      expect.objectContaining({ code: 'MAQUINARIA_AGRICOLA', isLeaf: false, assets: { active: 2, inactive: 1, total: 3 } }),
+    ]);
+    expect(repo.countAssetsInSubtrees).toHaveBeenCalledTimes(1);
+    expect(repo.countAssetsInSubtrees).toHaveBeenCalledWith([1, 2]);
+  });
+
+  it('por código (count_assets del asistente) y con la ruta desde la raíz', async () => {
+    repo.findAncestors.mockResolvedValue([ref(VEHICULOS), ref(MAQUINARIA)]);
+    const result = await service.countAssets({ code: 'TRACTOR' });
+    expect(result.category).toMatchObject({ code: 'TRACTOR', isLeaf: true });
+    expect(result.category.path.map((p) => p.code)).toEqual(['VEHICULOS', 'MAQUINARIA_AGRICOLA']);
+    expect(result.breakdown).toEqual([]);
+    expect(result.assets.total).toBe(3);
+  });
+
+  it('sin categoría: resumen de la finca por raíz; una raíz sin activos cuenta 0', async () => {
+    const result = await service.countAssets({});
+    expect(result.category).toBeNull();
+    expect(result.breakdown.map((g) => [g.code, g.assets.total])).toEqual([['CAMPO', 2], ['PERSONAL', 3], ['VEHICULOS', 3]]);
+    expect(result.assets).toEqual({ active: 7, inactive: 1, total: 8 });
+  });
+
+  it('categoría inexistente, por id o por código → NOT_FOUND', async () => {
+    await expect(service.countAssets({ categoryId: 99 })).rejects.toMatchObject({ code: 'NOT_FOUND' });
+    await expect(service.countAssets({ code: 'NO_EXISTE' })).rejects.toMatchObject({ code: 'NOT_FOUND' });
+    expect(repo.countAssetsInSubtrees).not.toHaveBeenCalled();
   });
 });

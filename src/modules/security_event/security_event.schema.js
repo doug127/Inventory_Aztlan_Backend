@@ -1,27 +1,10 @@
 import { z } from 'zod';
 import { AUTH_EVENT_TYPES } from '#src/shared/constants/auth.js';
+import { dateParam } from '#src/shared/schemas/dates.js';
 
 // Filtros de la bitácora de seguridad (HU-110, user_flow.md §15): usuario, tipo, IP y fecha.
 
 const EVENT_TYPE_VALUES = Object.values(AUTH_EVENT_TYPES);
-const DATE_ONLY = /^\d{4}-\d{2}-\d{2}$/;
-
-/** Fecha 'AAAA-MM-DD' (día completo en la hora del servidor) o fecha y hora ISO 8601. */
-const dateParam = (name, { endOfDay = false } = {}) =>
-  z
-    .string()
-    .trim()
-    .refine((value) => !Number.isNaN(Date.parse(DATE_ONLY.test(value) ? `${value}T00:00:00` : value)), {
-      error: `${name} debe ser una fecha AAAA-MM-DD o una fecha y hora ISO 8601`,
-    })
-    .transform((value) => {
-      if (!DATE_ONLY.test(value)) return new Date(value);
-      const date = new Date(`${value}T00:00:00`);
-      // `to` con solo la fecha incluye todo ese día: el límite es el inicio del día siguiente.
-      if (endOfDay) date.setDate(date.getDate() + 1);
-      return date;
-    })
-    .optional();
 
 export const ListSecurityEventsQuerySchema = z
   .object({

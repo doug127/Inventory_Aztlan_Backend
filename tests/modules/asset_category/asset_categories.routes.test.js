@@ -173,6 +173,58 @@ describe('Alta, iconos y reglas del árbol (ADMIN)', () => {
   });
 });
 
+describe('Activos por categoría incluyendo subcategorías (HU-303)', () => {
+  it('3 tractores y 2 de línea amarilla: VEHICULOS los incluye más la cosechadora y los de transporte (Módulo 5)', async () => {
+    const usuario = await tokenOf(await createTestUser({ name: 'ac.usr', roleCode: 'USUARIO' }));
+    await insertAsset(await idOf('TRACTOR')); // T-01, T-02 sembrados + este = 3 tractores
+    await insertAsset(await idOf('CARGADOR_FRONTAL'), { isActive: false });
+    try {
+      const res = await api.get(`${BASE}/asset-counts?code=vehiculos`, { token: usuario });
+      expect(res.status).toBe(200);
+      const { category, assets, breakdown } = res.body.data;
+      expect(category).toMatchObject({ code: 'VEHICULOS', isLeaf: false, displayIcon: 'tractor', path: [] });
+      // 3 tractores + cosechadora + retro + cargador + camión + camioneta; el cargador de prueba está inactivo.
+      expect(assets).toEqual({ active: 8, inactive: 1, total: 9 });
+      expect(Object.fromEntries(breakdown.map((g) => [g.code, g.assets.active]))).toEqual({
+        LINEA_AMARILLA: 2,
+        MAQUINARIA_AGRICOLA: 4,
+        TRANSPORTE: 2,
+      });
+
+      const yellow = await api.get(`${BASE}/asset-counts?categoryId=${await idOf('LINEA_AMARILLA')}`, { token: usuario });
+      expect(yellow.body.data.assets).toEqual({ active: 2, inactive: 1, total: 3 });
+      expect(yellow.body.data.category.path.map((p) => p.code)).toEqual(['VEHICULOS']);
+
+      const tractor = await api.get(`${BASE}/asset-counts?code=TRACTOR`, { token: usuario });
+      expect(tractor.body.data).toMatchObject({ category: { isLeaf: true }, assets: { active: 3 }, breakdown: [] });
+    } finally {
+      await sequelize.query("DELETE FROM assets WHERE name LIKE 'test.%'");
+    }
+  });
+
+  it('sin categoría: una fila por raíz y el total de la finca igual a todos los activos', async () => {
+    const res = await api.get(`${BASE}/asset-counts`, { token: almacenista });
+    expect(res.status).toBe(200);
+    const { category, assets, breakdown } = res.body.data;
+    expect(category).toBeNull();
+    expect(breakdown.every((g) => g.parent === undefined)).toBe(true);
+    expect(breakdown.map((g) => g.code)).toEqual(expect.arrayContaining(['VEHICULOS', 'CAMPO', 'PERSONAL']));
+    const [{ count }] = await sequelize.query('SELECT count(*)::int AS count FROM assets', { type: QueryTypes.SELECT });
+    expect(assets.total).toBe(count);
+    expect(breakdown.reduce((sum, g) => sum + g.assets.total, 0)).toBe(count);
+  });
+
+  it('código inexistente → 404 NOT_FOUND; categoryId y code a la vez → 400; sin sesión → 401', async () => {
+    const missing = await api.get(`${BASE}/asset-counts?code=NO_EXISTE`, { token: almacenista });
+    expect(missing.status).toBe(404);
+    expect(missing.body.error.code).toBe('NOT_FOUND');
+    const both = await api.get(`${BASE}/asset-counts?code=TRACTOR&categoryId=1`, { token: almacenista });
+    expect(both.status).toBe(400);
+    expect(both.body.error.code).toBe('VALIDATION_ERROR');
+    expect((await api.get(`${BASE}/asset-counts`)).status).toBe(401);
+  });
+});
+
 describe('Respaldo en la base de datos (migración 20261118000001)', () => {
   it('un activo en una categoría con hijas lo rechaza el trigger → CATEGORY_NOT_LEAF', async () => {
     const error = await dbError(insertAsset(await idOf('VEHICULOS')));
