@@ -1,4 +1,4 @@
-import { defineConfig } from 'vitest/config';
+import { configDefaults, defineConfig } from 'vitest/config';
 import path from 'path';
 
 export default defineConfig({
@@ -21,6 +21,8 @@ export default defineConfig({
       RESET_PASSWORD_RATE_LIMIT_PER_15_MIN: '10000',
     },
     setupFiles: ['./tests/setup.js'],
+    // legacy/: código y pruebas del esquema anterior retirados al reescribir movimientos y stock (HU-401).
+    exclude: [...configDefaults.exclude, 'legacy/**'],
     // Las pruebas de integración comparten la misma base: se ejecutan de a un archivo a la vez.
     fileParallelism: false,
   }

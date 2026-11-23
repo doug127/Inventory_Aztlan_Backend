@@ -207,8 +207,6 @@ export const updateAsset = async (id, changes, { transaction } = {}) => {
   await Asset.update(changes, { where: { id }, transaction });
 };
 
-/** Compatibilidad con el módulo de movimientos heredado (se reescribe en HU-401). */
-export const findAssetsByIdsRepository = async (ids, transaction) => (await Asset.findAll({ where: { id: ids }, transaction })).map(plain);
 
 // --- Ficha del activo: consumos e historial (HU-304) ------------------------------
 

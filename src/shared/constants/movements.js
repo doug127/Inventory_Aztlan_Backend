@@ -30,3 +30,20 @@ export const ASSET_LINE_KINDS = {
   DEVOLUCION: 'DEVOLUCION',
   OTRO: 'OTRO',
 };
+
+/** Motivos permitidos por tipo (chk_movement_reason, business_rules.md §2.1). */
+export const REASONS_BY_TYPE = {
+  IN: ['COMPRA', 'DEVOLUCION', 'OTRO'],
+  OUT: ['CONSUMO', 'PRESTAMO', 'DESECHO', 'VENTA', 'OTRO'],
+  TRANSFER: ['TRASLADO'],
+  ADJUST: ['AJUSTE'],
+};
+
+/** Motivos de OUT que exigen un activo en cada línea (§2.3 reglas 3 y 4; trg_movement_lines_asset_rule). */
+export const OUT_REASONS_REQUIRING_ASSET = ['CONSUMO', 'PRESTAMO'];
+
+/** Motivos de OUT que exigen observación: DESECHO (§2.3 regla 5) y OTRO (user_flow.md §5, paso 1). */
+export const OUT_REASONS_REQUIRING_NOTE = ['DESECHO', 'OTRO'];
+
+/** Días de atraso que puede registrar un ALMACENISTA (§4 regla 2). */
+export const BACKDATE_DAYS_ALMACENISTA = 3;

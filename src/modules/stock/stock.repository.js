@@ -1,77 +1,75 @@
-import { Product, Warehouse, Stock, Unit, CategoryProduct } from "#src/database/models/index.model.js";
+// Saldos de stock por producto y almacén (db_schema.md §4). No valida: el service de movimientos
+// decide con las filas ya bloqueadas. Las cantidades NUMERIC(14,3) viajan como texto.
+import { QueryTypes } from 'sequelize';
+import { sequelize } from '#src/config/database.js';
 
-export const findStockRepository = async (product_id, warehouse_id) => {
-    return await Stock.findOne({
-        where: { product_id, warehouse_id },
-        attributes: ['quantity'],
-        include: [
-            {
-                model: Product,
-                attributes: ['id', 'name', 'code', 'content_quantity', 'min_stock', 'max_stock'],
-                include: [
-                    {
-                        model: Unit,
-                        attributes: ['id', 'name', 'code']
-                    },
-                    {
-                        model: CategoryProduct,
-                        attributes: ['id', 'name']
-                    }
-                ]
-            }
-        ]
-    });
-}
+/**
+ * Bloquea FOR UPDATE las filas de stock de esos productos en el almacén, en orden ascendente de
+ * product_id (business_rules.md P4: mismo orden en todas las transacciones, sin deadlocks). Devuelve
+ * Map(productId → cantidad en texto). Un producto sin fila no tiene existencia en ese almacén.
+ */
+export const lockStockRows = async (warehouseId, productIds, { transaction }) => {
+  if (!productIds.length) return new Map();
+  const rows = await sequelize.query(
+    `SELECT product_id AS "productId", quantity::text AS quantity
+     FROM stock
+     WHERE warehouse_id = :warehouseId AND product_id IN (:productIds)
+     ORDER BY product_id
+     FOR UPDATE`,
+    { replacements: { warehouseId, productIds }, type: QueryTypes.SELECT, transaction }
+  );
+  return new Map(rows.map((row) => [row.productId, row.quantity]));
+};
 
-export const findStockForUpdateRepository = async (product_id, warehouse_id, transaction) => {
-    return await Stock.findOne({
-        where: { product_id, warehouse_id },
-        transaction,
-        lock: transaction.LOCK.UPDATE
-    });
-}
+/** Resta en SQL sobre la fila ya bloqueada; el CHECK (quantity >= 0) es la última barrera. */
+export const decrementStock = async (warehouseId, productId, quantity, { transaction }) => {
+  await sequelize.query(
+    `UPDATE stock SET quantity = quantity - :quantity::numeric, last_update = now()
+     WHERE warehouse_id = :warehouseId AND product_id = :productId`,
+    { replacements: { warehouseId, productId, quantity }, transaction }
+  );
+};
 
-export const createStockRepository = async (data, transaction=null) => {
-    return await Stock.create(data, { transaction });
-}
+/** Entradas (HU-402): crea la fila si no existe y suma. */
+export const incrementStock = async (warehouseId, productId, quantity, { transaction }) => {
+  await sequelize.query(
+    `INSERT INTO stock (product_id, warehouse_id, quantity, last_update)
+     VALUES (:productId, :warehouseId, :quantity::numeric, now())
+     ON CONFLICT (product_id, warehouse_id)
+     DO UPDATE SET quantity = stock.quantity + EXCLUDED.quantity, last_update = now()`,
+    { replacements: { productId, warehouseId, quantity }, transaction }
+  );
+};
 
-export const updateStockRepository = async (stockInstance, newQuantity, transaction=null) => {
-    stockInstance.quantity = newQuantity;
-    await stockInstance.save({ transaction });
-    return stockInstance;
-}
+/**
+ * Existencia total (todos los almacenes) y mínimo de cada producto, para el aviso de bajo mínimo
+ * (business_rules.md §7). Dentro de la transacción ve el stock ya descontado.
+ */
+export const findStockTotals = async (productIds, { transaction } = {}) => {
+  if (!productIds.length) return [];
+  return sequelize.query(
+    `SELECT p.id AS "productId", p.code, p.name, u.code AS "unitCode", p.min_stock::text AS "minStock",
+            COALESCE(sum(s.quantity), 0)::text AS total
+     FROM products p
+     JOIN units u ON u.id = p.unit_id
+     LEFT JOIN stock s ON s.product_id = p.id
+     WHERE p.id IN (:productIds)
+     GROUP BY p.id, p.code, p.name, u.code, p.min_stock
+     ORDER BY p.id`,
+    { replacements: { productIds }, type: QueryTypes.SELECT, transaction }
+  );
+};
 
-// ? A futuro vamos a trabajar en este repositorio para dividir en consultas para listados, reportes
-// ? y detalles de stock. 
-export const getAllStocksRepository = async ({where, limit, offset, order}) => {  
-    const options = {
-        where,
-        attributes: ['quantity'],
-        include: [
-            {
-                model: Product,
-                attributes: ['id', 'name', 'code'],
-                include: [
-                    {
-                        model: Unit,
-                        attributes: ['code']
-                    },
-                    {
-                        model: CategoryProduct,
-                        attributes: ['name']
-                    }
-                ]
-            }
-        ],
-        limit,
-        offset,
-        order: [['id', order]]
-    };
-
-    const { count, rows } = await Stock.findAndCountAll(options);
-    return { count, stocks: rows };
-}
-
-export const createInventoryAdjustmentRepository = async (data, transaction = null) => {
-  return await Stock.create(data, { transaction });
+/** Existencia de cada producto en un almacén, para el formulario de la orden de retiro. */
+export const findAvailability = async (warehouseId, productIds) => {
+  if (!productIds.length) return [];
+  return sequelize.query(
+    `SELECT p.id AS "productId", p.code, u.code AS "unitCode", COALESCE(s.quantity, 0)::text AS available
+     FROM products p
+     JOIN units u ON u.id = p.unit_id
+     LEFT JOIN stock s ON s.product_id = p.id AND s.warehouse_id = :warehouseId
+     WHERE p.id IN (:productIds)
+     ORDER BY p.id`,
+    { replacements: { warehouseId, productIds }, type: QueryTypes.SELECT }
+  );
 };

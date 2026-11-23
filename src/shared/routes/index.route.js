@@ -6,8 +6,6 @@ import productCategoryRoutes from '#src/modules/product/product_category/product
 import unitRoutes from '#src/modules/product/unit/unit.route.js';
 import productRoutes from '#src/modules/product/product.route.js';
 import stockRoutes from '#src/modules/stock/stock.route.js';
-import movementTypes from '#src/modules/movement/movement_type/movement_type.route.js';
-import reasonRoutes from '#src/modules/movement/reason/reason.route.js';
 import movementRoutes from '#src/modules/movement/movement.route.js';
 import assetCategoryRoutes from '#src/modules/asset/asset_category/asset_category.route.js';
 import assetRouter from '#src/modules/asset/asset.route.js';
@@ -24,8 +22,6 @@ routes.use('/product-categories', productCategoryRoutes);
 routes.use('/units', unitRoutes);
 routes.use('/products', productRoutes);
 routes.use('/stock', stockRoutes);
-routes.use('/movement-types', movementTypes);
-routes.use('/reasons', reasonRoutes);
 routes.use('/asset-categories', assetCategoryRoutes);
 routes.use('/assets', assetRouter);
 routes.use('/security-events', securityEventRoutes);

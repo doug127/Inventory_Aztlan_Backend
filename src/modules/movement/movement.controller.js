@@ -1,49 +1,16 @@
-import {
-    createMovementService,
-    getFilteredMovementsServices,
-    getMovementByIdService,
-    getProductMovementsService
-} from "./movement.service.js";
+import * as movementService from './movement.service.js';
+import { addLogContext, sendOk } from '#src/shared/http/response.js';
 
-export const getAllMovementsControllers = async (req, res) => {
-    try {
-        const result = await getFilteredMovementsServices(req.query);
-        res.status(200).json(result);
-    } catch (error) {
-        res.status(500).json({ error: error.message });
-    }
-}
+// Sin try/catch: Express 5 lleva cualquier error de una función async al errorHandler.
 
-export const getMovementByIdController = async (req, res) => {
-    try {
-        const { id } = req.params;
-        const result = await getMovementByIdService(id);
-        res.status(200).json(result);
-    } catch (error) {
-        res.status(500).json({ error: error.message });
-    }
-}
+export const getMovementController = async (req, res) => sendOk(res, await movementService.getMovement(req.validated.params.id));
 
-export const getProductMovementsController = async (req, res) => {
-    try {
-        const { id } = req.params;
-        const result = await getProductMovementsService(id, req.query);
-        res.status(200).json(result);
-    } catch (error) {
-        res.status(400).json({ error: error.message });
-    }
-}
-
-export const createMovementController = async (req, res) => {
-    try {
-        const data = req.validatedData;
-        console.log("Data recibida en el controller:", data);
-        const id = req.user.id;
-
-        const movement = await createMovementService(data, id);
-
-        res.status(201).json(movement);
-    } catch (error) {
-        res.status(400).json({ error: error.message });
-    }
+/** 201 con la orden nueva; 200 con la original si el Idempotency-Key ya se usó (meta.duplicated). */
+export const createWithdrawalController = async (req, res) => {
+  const { movement, duplicated, warnings } = await movementService.createWithdrawalOrder(req.validated.body, {
+    actor: req.user,
+    idempotencyKey: req.validated.headers?.['idempotency-key'],
+  });
+  addLogContext(res, { doc: movement.documentNumber, lines: movement.lines.length, duplicated });
+  return sendOk(res, movement, { status: duplicated ? 200 : 201, meta: { duplicated, warnings } });
 };

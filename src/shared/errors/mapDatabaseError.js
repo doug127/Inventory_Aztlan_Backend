@@ -46,6 +46,10 @@ export const CONSTRAINT_MAP = Object.freeze({
   chk_movement_received_by: { code: 'VALIDATION_ERROR', message: 'Los préstamos requieren indicar quién recibe' },
   chk_movement_lines_quantity: { code: 'VALIDATION_ERROR', message: 'La cantidad de cada línea debe ser mayor que 0' },
   uq_movement_headers_idempotency_key: { code: 'DUPLICATE_REQUEST' },
+  chk_movement_headers_work_order_format: { code: 'VALIDATION_ERROR', message: 'La orden de trabajo es OT- seguido de letras, números o guiones' },
+  chk_movement_headers_work_order_type: { code: 'VALIDATION_ERROR', message: 'Solo las órdenes de retiro llevan orden de trabajo' },
+  uq_movement_headers_withdrawal_reference: { code: 'DUPLICATE_CODE', message: 'La referencia de la orden ya existe' },
+  chk_withdrawal_reference_sequences_max: { code: 'VALIDATION_ERROR', message: 'El almacén llegó al máximo de 999999 órdenes de retiro en el año' },
   uq_movement_lines_header_product_asset: { code: 'VALIDATION_ERROR', message: 'Hay líneas repetidas con el mismo producto y activo' },
 
   // Autenticación y usuarios

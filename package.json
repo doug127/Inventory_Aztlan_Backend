@@ -14,6 +14,7 @@
     "db:test:setup": "sequelize-cli db:migrate --env test && sequelize-cli db:seed:all --env test",
     "db:reset-superadmin": "node src/database/scripts/reset-superadmin-password.js",
     "db:seed:demo-users": "sequelize-cli db:seed --seed 20261109100010-seed-demo-users.js",
+    "db:seed:demo-stock": "sequelize-cli db:seed --seed 20261122100011-seed-demo-stock.js",
     "dev:reset-link": "node src/database/scripts/dev-reset-link.js",
     "dev:welcome-password": "node src/database/scripts/dev-welcome-password.js",
     "email:send-pending": "node src/database/scripts/send-pending-emails.js"
