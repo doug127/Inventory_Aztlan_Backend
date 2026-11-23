@@ -12,6 +12,7 @@ vi.mock('#src/modules/movement/movement.repository.js', () => ({
 vi.mock('#src/modules/stock/stock.repository.js', () => ({
   lockStockRows: vi.fn(),
   decrementStock: vi.fn(),
+  incrementStock: vi.fn(),
   findStockTotals: vi.fn(),
 }));
 vi.mock('#src/modules/warehouse/warehouse.service.js', () => ({ assertWarehouseAvailable: vi.fn() }));
@@ -183,5 +184,58 @@ describe('withdrawalReference', () => {
       { actor: ADMIN }
     );
     expect(repo.nextWithdrawalReferenceNumber).toHaveBeenCalledWith(2, lastYear.getFullYear(), { transaction: 'tx' });
+  });
+});
+
+describe('createEntry (HU-402)', () => {
+  const entry = (lines, overrides = {}) => ({ warehouseId: 5, reason: 'COMPRA', reference: null, note: null, lines, ...overrides });
+
+  beforeEach(() => {
+    repo.nextDocumentNumber.mockResolvedValue('ENT-000032');
+    assertWarehouseAvailable.mockResolvedValue({ id: 5, code: 'PRIN', isActive: true });
+  });
+
+  it('suma el total de cada producto en orden ascendente, con ENT- y sin activo ni referencia automática', async () => {
+    const result = await service.createEntry(
+      entry([
+        { productId: 11, quantity: '4' },
+        { productId: 10, quantity: '0.1' },
+        { productId: 10, quantity: '0.2' },
+      ]),
+      { actor: ALMACENISTA }
+    );
+    expect(assertWarehouseAvailable).toHaveBeenCalledWith(5, { transaction: 'tx', role: 'destino' });
+    expect(repo.nextDocumentNumber).toHaveBeenCalledWith('IN', { transaction: 'tx' });
+    expect(repo.nextWithdrawalReferenceNumber).not.toHaveBeenCalled();
+    expect(stock.incrementStock.mock.calls.map((c) => [c[1], c[2]])).toEqual([
+      [10, '0.300'],
+      [11, '4.000'],
+    ]);
+    expect(stock.lockStockRows).not.toHaveBeenCalled();
+    expect(repo.createMovement).toHaveBeenCalledWith(
+      expect.objectContaining({ movementType: 'IN', warehouseFromId: null, warehouseToId: 5, reference: null, workOrder: null }),
+      { transaction: 'tx' }
+    );
+    expect(result.warnings.consolidated).toEqual([{ productId: 10, assetId: null, lines: [2, 3] }]);
+  });
+
+  it('avisa los productos que quedan sobre su máximo; sin máximo no avisa', async () => {
+    stock.findStockTotals.mockResolvedValue([
+      { productId: 10, code: 'COMB-0001', name: 'Diésel', unitCode: 'L', total: '10500', minStock: '500', maxStock: '10000' },
+      { productId: 11, code: 'LUBR-0001', name: 'Aceite', unitCode: 'L', total: '900', minStock: '50', maxStock: null },
+    ]);
+    const result = await service.createEntry(entry([{ productId: 10, quantity: '1000' }, { productId: 11, quantity: '1' }]), { actor: ALMACENISTA });
+    expect(result.warnings.aboveMaximum).toEqual([expect.objectContaining({ productCode: 'COMB-0001', total: '10500.000', maxStock: '10000.000' })]);
+  });
+
+  it('reglas de forma antes de abrir la transacción', async () => {
+    const reject = (input) => service.createEntry(input, { actor: ALMACENISTA });
+    await expect(reject(entry([{ productId: 10, quantity: '1' }], { reason: 'DEVOLUCION' }))).rejects.toMatchObject({ code: 'INVALID_MOVEMENT_REASON' });
+    await expect(reject(entry([{ productId: 10, quantity: '1' }], { reason: 'VENTA' }))).rejects.toMatchObject({ code: 'INVALID_MOVEMENT_REASON' });
+    await expect(reject(entry([]))).rejects.toMatchObject({ code: 'EMPTY_MOVEMENT' });
+    await expect(reject(entry([{ productId: 10, quantity: '1' }], { reason: 'OTRO' }))).rejects.toMatchObject({ code: 'VALIDATION_ERROR' });
+    await expect(reject(entry([{ productId: 10, quantity: '1' }], { reference: 'REV-ENT-000032' }))).rejects.toMatchObject({ code: 'VALIDATION_ERROR' });
+    await expect(reject(entry([{ productId: 10, quantity: '1', assetId: 3 }]))).rejects.toMatchObject({ code: 'ASSET_NOT_ALLOWED' });
+    expect(assertWarehouseAvailable).not.toHaveBeenCalled();
   });
 });

@@ -45,5 +45,8 @@ export const OUT_REASONS_REQUIRING_ASSET = ['CONSUMO', 'PRESTAMO'];
 /** Motivos de OUT que exigen observación: DESECHO (§2.3 regla 5) y OTRO (user_flow.md §5, paso 1). */
 export const OUT_REASONS_REQUIRING_NOTE = ['DESECHO', 'OTRO'];
 
+/** Motivos de la entrada que se registran hoy: COMPRA y OTRO. DEVOLUCION llega con los préstamos (HU-405). */
+export const ENTRY_REASONS = ['COMPRA', 'OTRO'];
+
 /** Días de atraso que puede registrar un ALMACENISTA (§4 regla 2). */
 export const BACKDATE_DAYS_ALMACENISTA = 3;

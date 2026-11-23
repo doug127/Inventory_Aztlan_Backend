@@ -42,19 +42,19 @@ export const incrementStock = async (warehouseId, productId, quantity, { transac
 };
 
 /**
- * Existencia total (todos los almacenes) y mínimo de cada producto, para el aviso de bajo mínimo
- * (business_rules.md §7). Dentro de la transacción ve el stock ya descontado.
+ * Existencia total (todos los almacenes), mínimo y máximo de cada producto, para los avisos de bajo
+ * mínimo y sobre máximo (business_rules.md §7). Dentro de la transacción ve el stock ya descontado.
  */
 export const findStockTotals = async (productIds, { transaction } = {}) => {
   if (!productIds.length) return [];
   return sequelize.query(
-    `SELECT p.id AS "productId", p.code, p.name, u.code AS "unitCode", p.min_stock::text AS "minStock",
+    `SELECT p.id AS "productId", p.code, p.name, u.code AS "unitCode", p.min_stock::text AS "minStock", p.max_stock::text AS "maxStock",
             COALESCE(sum(s.quantity), 0)::text AS total
      FROM products p
      JOIN units u ON u.id = p.unit_id
      LEFT JOIN stock s ON s.product_id = p.id
      WHERE p.id IN (:productIds)
-     GROUP BY p.id, p.code, p.name, u.code, p.min_stock
+     GROUP BY p.id, p.code, p.name, u.code, p.min_stock, p.max_stock
      ORDER BY p.id`,
     { replacements: { productIds }, type: QueryTypes.SELECT, transaction }
   );

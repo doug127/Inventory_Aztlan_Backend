@@ -73,6 +73,37 @@ export const CreateWithdrawalSchema = z
   })
   .strict();
 
+/**
+ * Documento del proveedor (naming_conventions.md §8.2): PREFIJO-número, por ejemplo FAC-0012345,
+ * OC-2026-0087, NE-4521 o GD-998. Se guarda en mayúsculas. Recomendada en COMPRA, no obligatoria.
+ */
+export const ENTRY_REFERENCE_PATTERN = /^[A-Z]{2,4}-[A-Z0-9][A-Z0-9-]{0,40}$/;
+const entryReferenceField = z
+  .string({ error: 'La referencia debe ser texto' })
+  .trim()
+  .toUpperCase()
+  .transform((value) => value.replace(/\s+/g, ''))
+  .refine((value) => value === '' || ENTRY_REFERENCE_PATTERN.test(value), {
+    error: 'La referencia es PREFIJO-número: FAC-0012345, OC-2026-0087, NE-4521 o GD-998',
+  })
+  .transform((value) => value || null)
+  .nullable()
+  .optional()
+  .transform((value) => value ?? null);
+
+export const CreateEntrySchema = z
+  .object({
+    warehouseId: idField('warehouseId'),
+    reason: z.enum(Object.values(MOVEMENT_REASONS), { error: 'Motivo desconocido' }),
+    movementDate: movementDateField,
+    reference: entryReferenceField,
+    // Quien entrega físicamente (chofer del proveedor). Opcional.
+    receivedBy: optionalText('Entregado por', 150),
+    note: optionalText('La observación', 1000),
+    lines: z.array(LineSchema, { error: 'lines debe ser una lista' }).max(100, 'Una entrada admite hasta 100 líneas'),
+  })
+  .strict();
+
 export const MovementIdParamsSchema = z.object({
   id: z.coerce.number({ error: 'El id debe ser un número' }).int('El id debe ser un entero').positive('El id debe ser positivo'),
 });
