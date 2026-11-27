@@ -8,7 +8,10 @@ vi.mock('#src/modules/movement/movement.repository.js', () => ({
   nextDocumentNumber: vi.fn(),
   nextWithdrawalReferenceNumber: vi.fn(),
   createMovement: vi.fn(),
+  findDocument: vi.fn(),
+  attachDocumentFile: vi.fn(),
 }));
+vi.mock('#src/shared/storage/fileStorage.js', () => ({ saveFile: vi.fn(), readStoredFile: vi.fn(), removeFile: vi.fn() }));
 vi.mock('#src/modules/stock/stock.repository.js', () => ({
   lockStockRows: vi.fn(),
   decrementStock: vi.fn(),
@@ -25,6 +28,7 @@ const stock = await import('#src/modules/stock/stock.repository.js');
 const { assertWarehouseAvailable } = await import('#src/modules/warehouse/warehouse.service.js');
 const { assertProductAvailable } = await import('#src/modules/product/product.service.js');
 const { assertAssetAvailable } = await import('#src/modules/asset/asset.service.js');
+const fileStorage = await import('#src/shared/storage/fileStorage.js');
 const service = await import('#src/modules/movement/movement.service.js');
 const { consolidateLines, resolveMovementDate } = await import('#src/modules/movement/movement.rules.js');
 
@@ -237,5 +241,112 @@ describe('createEntry (HU-402)', () => {
     await expect(reject(entry([{ productId: 10, quantity: '1' }], { reference: 'REV-ENT-000032' }))).rejects.toMatchObject({ code: 'VALIDATION_ERROR' });
     await expect(reject(entry([{ productId: 10, quantity: '1', assetId: 3 }]))).rejects.toMatchObject({ code: 'ASSET_NOT_ALLOWED' });
     expect(assertWarehouseAvailable).not.toHaveBeenCalled();
+  });
+});
+
+describe('documentos de recepción de la entrada', () => {
+  const entry = (documents, overrides = {}) => ({
+    warehouseId: 5,
+    reason: 'COMPRA',
+    reference: null,
+    note: null,
+    lines: [{ productId: 10, quantity: '1' }],
+    documents,
+    ...overrides,
+  });
+  const factura = { documentType: 'FACTURA', documentNumber: '0012345', supplierName: 'Agro Sur', supplierTaxId: null, issueDate: '2026-11-20', totalAmount: '150.00', currency: 'USD' };
+  const vale = { documentType: 'VALE', documentNumber: '88', supplierName: null, supplierTaxId: null, issueDate: null, totalAmount: null, currency: null };
+
+  beforeEach(() => {
+    repo.nextDocumentNumber.mockResolvedValue('ENT-000033');
+    assertWarehouseAvailable.mockResolvedValue({ id: 5, code: 'PRIN', isActive: true });
+  });
+
+  it('guarda los documentos con la entrada y, sin referencia escrita, toma la del primero (FAC-0012345)', async () => {
+    await service.createEntry(entry([factura, vale]), { actor: ALMACENISTA });
+    expect(repo.createMovement).toHaveBeenCalledWith(
+      expect.objectContaining({ reference: 'FAC-0012345', documents: [factura, vale] }),
+      { transaction: 'tx' }
+    );
+    expect(service.entryReference({ reference: 'OC-2026-0087', documents: [factura] })).toBe('OC-2026-0087');
+    expect(service.entryReference({ reference: null, documents: [vale] })).toBe('VAL-88');
+    expect(service.entryReference({ reference: null, documents: [] })).toBeNull();
+  });
+
+  it('el mismo tipo y número repetido, o una fecha de emisión futura → VALIDATION_ERROR señalando el documento', async () => {
+    await expect(service.createEntry(entry([factura, vale, { ...factura }]), { actor: ALMACENISTA })).rejects.toMatchObject({
+      code: 'VALIDATION_ERROR',
+      details: [expect.objectContaining({ path: 'documents.2.documentNumber' })],
+    });
+    await expect(service.createEntry(entry([{ ...vale, issueDate: '2999-01-01' }]), { actor: ALMACENISTA })).rejects.toMatchObject({
+      details: [expect.objectContaining({ path: 'documents.0.issueDate' })],
+    });
+    expect(repo.createMovement).not.toHaveBeenCalled();
+  });
+});
+
+describe('attachDocumentFile', () => {
+  const PDF = Buffer.from('%PDF-1.7 contenido');
+  const stored = (overrides = {}) => ({
+    id: 4,
+    movementHeaderId: 1,
+    documentType: 'FACTURA',
+    documentNumber: '0012345',
+    supplierName: null,
+    supplierTaxId: null,
+    issueDate: null,
+    totalAmount: null,
+    currency: null,
+    fileStorageKey: null,
+    createdAt: '2026-11-26T12:00:00Z',
+    header: { id: 1, movementType: 'IN', createdByUserId: ALMACENISTA.id },
+    ...overrides,
+  });
+  const attached = stored({
+    fileStorageKey: 'x.pdf',
+    fileOriginalName: 'factura.pdf',
+    fileMimeType: 'application/pdf',
+    fileSizeBytes: PDF.length,
+    fileSha256: 'a'.repeat(64),
+    fileUploadedAt: '2026-11-26T12:05:00Z',
+    fileUploadedBy: { id: 7, fullName: 'Almacenista' },
+  });
+  const file = (overrides = {}) => ({ buffer: PDF, mimeType: 'application/pdf', originalName: 'factura.pdf', ...overrides });
+
+  it('guarda en disco, adjunta con sha256 y tamaño, y devuelve el documento', async () => {
+    repo.findDocument.mockResolvedValueOnce(stored()).mockResolvedValueOnce(stored()).mockResolvedValueOnce(attached);
+    const doc = await service.attachDocumentFile(1, 4, file(), { actor: ALMACENISTA });
+    expect(fileStorage.saveFile).toHaveBeenCalledWith('receipt-documents', expect.stringMatching(/^[0-9a-f-]{36}\.pdf$/), PDF);
+    expect(repo.findDocument).toHaveBeenNthCalledWith(2, 1, 4, { transaction: 'tx', lock: true });
+    expect(repo.attachDocumentFile).toHaveBeenCalledWith(
+      4,
+      expect.objectContaining({ fileMimeType: 'application/pdf', fileSizeBytes: PDF.length, fileSha256: expect.stringMatching(/^[0-9a-f]{64}$/), fileUploadedByUserId: 7 }),
+      { transaction: 'tx' }
+    );
+    expect(doc).toMatchObject({ label: 'FAC-0012345', file: { name: 'factura.pdf', uploadedBy: { id: 7 } } });
+  });
+
+  it('otro ALMACENISTA → FORBIDDEN_ROLE; un ADMIN sí puede', async () => {
+    repo.findDocument.mockResolvedValue(stored());
+    await expect(service.attachDocumentFile(1, 4, file(), { actor: { id: 99, hierarchy: 2 } })).rejects.toMatchObject({ code: 'FORBIDDEN_ROLE' });
+    repo.findDocument.mockResolvedValueOnce(stored()).mockResolvedValueOnce(stored()).mockResolvedValueOnce(attached);
+    await expect(service.attachDocumentFile(1, 4, file(), { actor: ADMIN })).resolves.toBeTruthy();
+  });
+
+  it('ya adjunto → DOCUMENT_FILE_EXISTS; contenido que no coincide con el tipo → DOCUMENT_FILE_INVALID; sin escribir en disco', async () => {
+    repo.findDocument.mockResolvedValue(attached);
+    await expect(service.attachDocumentFile(1, 4, file(), { actor: ALMACENISTA })).rejects.toMatchObject({ code: 'DOCUMENT_FILE_EXISTS' });
+    repo.findDocument.mockResolvedValue(stored());
+    await expect(service.attachDocumentFile(1, 4, file({ mimeType: 'image/png' }), { actor: ALMACENISTA })).rejects.toMatchObject({ code: 'DOCUMENT_FILE_INVALID' });
+    await expect(service.attachDocumentFile(1, 4, file({ buffer: Buffer.alloc(0) }), { actor: ALMACENISTA })).rejects.toMatchObject({ code: 'DOCUMENT_FILE_INVALID' });
+    expect(fileStorage.saveFile).not.toHaveBeenCalled();
+  });
+
+  it('si la transacción falla (otra subida ganó la carrera), borra el archivo escrito', async () => {
+    repo.findDocument.mockResolvedValueOnce(stored()).mockResolvedValueOnce(attached);
+    await expect(service.attachDocumentFile(1, 4, file(), { actor: ALMACENISTA })).rejects.toMatchObject({ code: 'DOCUMENT_FILE_EXISTS' });
+    const key = fileStorage.saveFile.mock.calls[0][1];
+    expect(fileStorage.removeFile).toHaveBeenCalledWith('receipt-documents', key);
+    expect(repo.attachDocumentFile).not.toHaveBeenCalled();
   });
 });

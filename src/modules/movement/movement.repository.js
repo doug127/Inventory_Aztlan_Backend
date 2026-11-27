@@ -1,8 +1,8 @@
 // Movimientos (cabecera + líneas) y numeración de documentos (db_schema.md §4). No valida ni lanza
 // errores de negocio: el service decide. Los movimientos son inmutables: aquí solo hay INSERT y SELECT.
-import { QueryTypes } from 'sequelize';
+import { QueryTypes, Transaction } from 'sequelize';
 import { sequelize } from '#src/config/database.js';
-import { Asset, AssetCategory, MovementHeader, MovementLine, Product, Unit, User, Warehouse } from '#src/database/models/index.model.js';
+import { Asset, AssetCategory, MovementDocument, MovementHeader, MovementLine, Product, Unit, User, Warehouse } from '#src/database/models/index.model.js';
 
 const plain = (row) => (row ? row.get({ plain: true }) : null);
 const WAREHOUSE_ATTRIBUTES = ['id', 'code', 'name'];
@@ -18,6 +18,14 @@ const DETAIL_INCLUDE = [
       { model: Product, as: 'product', attributes: ['id', 'code', 'name'], include: [{ model: Unit, as: 'unit', attributes: ['code', 'name'] }] },
       { model: Asset, as: 'asset', attributes: ['id', 'code', 'name'], include: [{ model: AssetCategory, as: 'category', attributes: ['id', 'code', 'name'] }] },
     ],
+  },
+  // Consulta aparte (separate): evita multiplicar las filas de las líneas por las de los documentos.
+  {
+    model: MovementDocument,
+    as: 'documents',
+    separate: true,
+    order: [['id', 'ASC']],
+    include: [{ model: User, as: 'fileUploadedBy', attributes: ['id', 'fullName'] }],
   },
 ];
 
@@ -64,11 +72,43 @@ export const nextWithdrawalReferenceNumber = async (warehouseId, year, { transac
   return row.lastNumber;
 };
 
-export const createMovement = async ({ lines, ...header }, { transaction }) => {
+export const createMovement = async ({ lines, documents = [], ...header }, { transaction }) => {
   const created = await MovementHeader.create(header, { transaction });
   await MovementLine.bulkCreate(
     lines.map((line) => ({ ...line, movementHeaderId: created.id })),
     { transaction }
   );
+  if (documents.length) {
+    await MovementDocument.bulkCreate(
+      documents.map((doc) => ({ ...doc, movementHeaderId: created.id })),
+      { transaction }
+    );
+  }
   return created.id;
+};
+
+// --- Documentos de recepción ------------------------------------------------------------------
+
+const DOCUMENT_INCLUDE = [
+  { model: User, as: 'fileUploadedBy', attributes: ['id', 'fullName'] },
+  { model: MovementHeader, as: 'header', attributes: ['id', 'documentNumber', 'movementType', 'createdByUserId'] },
+];
+
+/**
+ * Documento de un movimiento (null si no existe o es de otro movimiento), con su cabecera y quién
+ * adjuntó el archivo. lock: true bloquea la fila del documento (FOR UPDATE) para adjuntar el archivo.
+ */
+export const findDocument = async (movementId, documentId, { transaction, lock = false } = {}) =>
+  plain(
+    await MovementDocument.findOne({
+      where: { id: documentId, movementHeaderId: movementId },
+      include: DOCUMENT_INCLUDE,
+      transaction,
+      lock: lock ? { level: Transaction.LOCK.UPDATE, of: MovementDocument } : undefined,
+    })
+  );
+
+/** Adjunta el archivo (columnas file_*). trg_movement_documents_rules impide hacerlo dos veces. */
+export const attachDocumentFile = async (documentId, file, { transaction }) => {
+  await MovementDocument.update(file, { where: { id: documentId }, transaction });
 };

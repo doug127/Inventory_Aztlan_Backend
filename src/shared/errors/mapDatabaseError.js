@@ -51,6 +51,17 @@ export const CONSTRAINT_MAP = Object.freeze({
   uq_movement_headers_withdrawal_reference: { code: 'DUPLICATE_CODE', message: 'La referencia de la orden ya existe' },
   chk_withdrawal_reference_sequences_max: { code: 'VALIDATION_ERROR', message: 'El almacén llegó al máximo de 999999 órdenes de retiro en el año' },
   uq_movement_lines_header_product_asset: { code: 'VALIDATION_ERROR', message: 'Hay líneas repetidas con el mismo producto y activo' },
+  uq_movement_documents_header_type_number: { code: 'VALIDATION_ERROR', message: 'Hay documentos repetidos con el mismo tipo y número' },
+  uq_movement_documents_file_storage_key: { code: 'INTERNAL_ERROR' },
+  chk_movement_documents_type: { code: 'VALIDATION_ERROR', message: 'Tipo de documento desconocido' },
+  chk_movement_documents_number: { code: 'VALIDATION_ERROR', message: 'El número del documento admite letras, números y guiones' },
+  chk_movement_documents_supplier_tax_id: { code: 'VALIDATION_ERROR', message: 'El RIF o NIT del proveedor no tiene un formato válido' },
+  chk_movement_documents_total_amount: { code: 'VALIDATION_ERROR', message: 'El monto del documento no puede ser negativo' },
+  chk_movement_documents_currency: { code: 'VALIDATION_ERROR', message: 'La moneda es un código de 3 letras y requiere el monto' },
+  chk_movement_documents_file_mime_type: { code: 'DOCUMENT_FILE_INVALID' },
+  chk_movement_documents_file_size: { code: 'DOCUMENT_FILE_TOO_LARGE' },
+  chk_movement_documents_file_sha256: { code: 'INTERNAL_ERROR' },
+  chk_movement_documents_file_complete: { code: 'INTERNAL_ERROR' },
 
   // Autenticación y usuarios
   uq_reset_token_active: { code: 'AUTH_RATE_LIMITED' },

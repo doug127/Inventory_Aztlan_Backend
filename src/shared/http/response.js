@@ -37,3 +37,19 @@ export const sendPaginated = (res, { items, total, page, limit, filters = {}, se
     },
   });
 };
+
+/**
+ * Responde un archivo binario (documentos adjuntos). disposition 'inline' lo abre en el navegador;
+ * 'attachment' lo descarga. El nombre va en ASCII y, completo, en filename* (RFC 6266).
+ */
+export const sendFile = (res, { buffer, mimeType, name, disposition = 'inline' }) => {
+  const ascii = name.replace(/[^\x20-\x7e]/g, '_').replace(/["\\]/g, '_');
+  res.set({
+    'Content-Type': mimeType,
+    'Content-Length': String(buffer.length),
+    'Content-Disposition': `${disposition}; filename="${ascii}"; filename*=UTF-8''${encodeURIComponent(name)}`,
+    'X-Content-Type-Options': 'nosniff',
+    'Cache-Control': 'private, no-store',
+  });
+  return res.status(200).send(buffer);
+};

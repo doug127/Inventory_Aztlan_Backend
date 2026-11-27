@@ -28,8 +28,13 @@ export const startServer = async (app) => {
         ...(cookie && { Cookie: cookie }),
         ...headers,
       },
-      body: body === undefined ? undefined : typeof body === 'string' ? body : JSON.stringify(body),
+      // Un Buffer (archivo) se envía tal cual, con el Content-Type que indique la prueba.
+      body: body === undefined ? undefined : typeof body === 'string' || Buffer.isBuffer(body) ? body : JSON.stringify(body),
     });
+    // Las respuestas que no son JSON (archivos) se devuelven en `buffer`.
+    if (!(res.headers.get('content-type') ?? 'application/json').includes('json')) {
+      return { status: res.status, headers: res.headers, body: null, buffer: Buffer.from(await res.arrayBuffer()), cookies: [], readCookie: () => null };
+    }
     const text = await res.text();
     const cookies = res.headers.getSetCookie().map(parseSetCookie);
     return {
@@ -45,6 +50,7 @@ export const startServer = async (app) => {
     baseUrl,
     get: (path, options) => request('GET', path, options),
     post: (path, options) => request('POST', path, options),
+    put: (path, options) => request('PUT', path, options),
     patch: (path, options) => request('PATCH', path, options),
     delete: (path, options) => request('DELETE', path, options),
     close: () => new Promise((resolve) => server.close(resolve)),

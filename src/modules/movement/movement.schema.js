@@ -1,5 +1,11 @@
 import { z } from 'zod';
-import { MOVEMENT_REASONS } from '#src/shared/constants/movements.js';
+import {
+  MAX_RECEIPT_DOCUMENTS,
+  MOVEMENT_REASONS,
+  RECEIPT_DOCUMENT_PREFIXES,
+  RECEIPT_DOCUMENT_TYPES,
+  RECEIPT_FILE_MIME_TYPES,
+} from '#src/shared/constants/movements.js';
 
 // Entrada de los movimientos (business_rules.md §2 y §3). Las reglas que dependen del motivo, del
 // rol o de la base de datos (activo obligatorio, fechas, existencia) las valida el service.
@@ -91,12 +97,78 @@ const entryReferenceField = z
   .optional()
   .transform((value) => value ?? null);
 
+/** Texto en mayúsculas sin espacios; vacío u omitido queda en null. */
+const upperCode = (name, pattern, message) =>
+  z
+    .string({ error: `${name} debe ser texto` })
+    .trim()
+    .toUpperCase()
+    .transform((value) => value.replace(/\s+/g, ''))
+    .refine((value) => value === '' || pattern.test(value), { error: message })
+    .transform((value) => value || null)
+    .nullable()
+    .optional()
+    .transform((value) => value ?? null);
+
+export const RECEIPT_DOCUMENT_NUMBER_PATTERN = /^[A-Z0-9][A-Z0-9-]{0,39}$/;
+
+/**
+ * Documento de recepción de una entrada (tabla movement_documents): factura, vale, recibo de compra,
+ * nota de entrega, guía de despacho u orden de compra. El número se guarda sin el prefijo del tipo:
+ * "FAC-0012345" en una FACTURA queda 0012345 (la referencia de la entrada vuelve a armar FAC-0012345).
+ * El archivo escaneado no viaja aquí: se adjunta después con PUT …/documents/:documentId/file.
+ */
+const ReceiptDocumentSchema = z
+  .object({
+    documentType: z.enum(Object.values(RECEIPT_DOCUMENT_TYPES), { error: 'Tipo de documento desconocido' }),
+    documentNumber: z
+      .string({ error: 'Indique el número del documento' })
+      .trim()
+      .toUpperCase()
+      .transform((value) => value.replace(/\s+/g, ''))
+      .refine((value) => value !== '', { error: 'Indique el número del documento' }),
+    supplierName: optionalText('El proveedor', 150),
+    // RIF o NIT del proveedor (J-12345678-9).
+    supplierTaxId: upperCode('El RIF o NIT', /^[A-Z0-9][A-Z0-9.-]{2,19}$/, 'El RIF o NIT admite letras, números, puntos y guiones (ej. J-12345678-9)'),
+    issueDate: z.iso
+      .date({ error: 'La fecha de emisión es AAAA-MM-DD' })
+      .nullable()
+      .optional()
+      .transform((value) => value ?? null),
+    // NUMERIC(14,2): hasta 12 enteros y 2 decimales. Se acepta número o texto ("1250,50").
+    totalAmount: z
+      .union([z.number(), z.string().trim()], { error: 'El monto debe ser un número' })
+      .transform((value) => String(value).replace(',', '.'))
+      .refine((value) => value === '' || /^\d{1,12}(\.\d{1,2})?$/.test(value), { error: 'El monto admite hasta 12 enteros y 2 decimales, sin signo' })
+      .transform((value) => value || null)
+      .nullable()
+      .optional()
+      .transform((value) => value ?? null),
+    currency: upperCode('La moneda', /^[A-Z]{3}$/, 'La moneda es un código ISO de 3 letras (USD, VES, EUR)'),
+  })
+  .strict()
+  .transform((doc) => {
+    const prefix = `${RECEIPT_DOCUMENT_PREFIXES[doc.documentType]}-`;
+    return doc.documentNumber.startsWith(prefix) ? { ...doc, documentNumber: doc.documentNumber.slice(prefix.length) } : doc;
+  })
+  .refine((doc) => RECEIPT_DOCUMENT_NUMBER_PATTERN.test(doc.documentNumber), {
+    error: 'El número del documento admite letras, números y guiones, hasta 40 caracteres',
+    path: ['documentNumber'],
+  })
+  .refine((doc) => !doc.currency || doc.totalAmount, { error: 'Indique el monto o quite la moneda', path: ['currency'] });
+
 export const CreateEntrySchema = z
   .object({
     warehouseId: idField('warehouseId'),
     reason: z.enum(Object.values(MOVEMENT_REASONS), { error: 'Motivo desconocido' }),
     movementDate: movementDateField,
+    // Sin referencia y con documentos, el service la arma con el primero (FAC-0012345).
     reference: entryReferenceField,
+    documents: z
+      .array(ReceiptDocumentSchema, { error: 'documents debe ser una lista' })
+      .max(MAX_RECEIPT_DOCUMENTS, `Una entrada admite hasta ${MAX_RECEIPT_DOCUMENTS} documentos`)
+      .optional()
+      .transform((value) => value ?? []),
     // Quien entrega físicamente (chofer del proveedor). Opcional.
     receivedBy: optionalText('Entregado por', 150),
     note: optionalText('La observación', 1000),
@@ -106,6 +178,40 @@ export const CreateEntrySchema = z
 
 export const MovementIdParamsSchema = z.object({
   id: z.coerce.number({ error: 'El id debe ser un número' }).int('El id debe ser un entero').positive('El id debe ser positivo'),
+});
+
+export const DocumentFileParamsSchema = z.object({
+  id: z.coerce.number({ error: 'El id debe ser un número' }).int('El id debe ser un entero').positive('El id debe ser positivo'),
+  documentId: z.coerce.number({ error: 'El documentId debe ser un número' }).int('El documentId debe ser un entero').positive('El documentId debe ser positivo'),
+});
+
+/**
+ * Subida del archivo: el cuerpo es el archivo crudo (no multipart), con su Content-Type y el nombre
+ * original en X-File-Name (codificado con encodeURIComponent). El contenido real se verifica en el service.
+ */
+export const DocumentFileHeadersSchema = z.looseObject({
+  'content-type': z
+    .string({ error: 'Indique el Content-Type del archivo' })
+    .transform((value) => value.split(';')[0].trim().toLowerCase())
+    .refine((value) => Object.hasOwn(RECEIPT_FILE_MIME_TYPES, value), { error: 'El archivo debe ser PDF, JPG, PNG o WEBP' }),
+  'x-file-name': z
+    .string({ error: 'Indique el nombre del archivo en X-File-Name' })
+    .transform((value, ctx) => {
+      try {
+        return decodeURIComponent(value);
+      } catch {
+        ctx.addIssue({ code: 'custom', message: 'X-File-Name debe ir codificado con encodeURIComponent' });
+        return z.NEVER;
+      }
+    })
+    // Solo el nombre, sin carpetas ni caracteres de control.
+    .transform((value) => value.split(/[\\/]/).pop().replace(/[\u0000-\u001f\u007f]/g, '').trim())
+    .refine((value) => value.length >= 1 && value.length <= 255, { error: 'El nombre del archivo debe tener entre 1 y 255 caracteres' }),
+});
+
+/** inline (por defecto) abre el archivo en el navegador; attachment lo descarga. */
+export const DocumentFileQuerySchema = z.object({
+  disposition: z.enum(['inline', 'attachment'], { error: 'disposition es inline o attachment' }).default('inline'),
 });
 
 /** Cabecera opcional Idempotency-Key (UUID): reintentos seguros desde campo y desde el asistente. */

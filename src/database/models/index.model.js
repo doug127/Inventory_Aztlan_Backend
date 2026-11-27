@@ -8,6 +8,7 @@ import {Warehouse} from './Warehouse.js';
 import {Stock} from './Stock.js';
 import {MovementHeader} from './MovementHeader.js';
 import {MovementLine} from './MovementLine.js';
+import {MovementDocument} from './MovementDocument.js';
 import {AssetCategory} from './AssetCategory.js';
 import {Asset} from './Asset.js';
 import {AuthEvent} from './AuthEvent.js';
@@ -59,6 +60,10 @@ MovementHeader.hasMany(MovementLine, { foreignKey: 'movementHeaderId', as: 'line
 MovementLine.belongsTo(MovementHeader, { foreignKey: 'movementHeaderId', as: 'header' });
 MovementLine.belongsTo(Product, { foreignKey: 'productId', as: 'product' });
 MovementLine.belongsTo(Asset, { foreignKey: 'assetId', as: 'asset' });
+// Documentos de recepción de las entradas (factura, vale, recibo…) y quién adjuntó su archivo.
+MovementHeader.hasMany(MovementDocument, { foreignKey: 'movementHeaderId', as: 'documents' });
+MovementDocument.belongsTo(MovementHeader, { foreignKey: 'movementHeaderId', as: 'header' });
+MovementDocument.belongsTo(User, { foreignKey: 'fileUploadedByUserId', as: 'fileUploadedBy' });
 
 // * Categorías de activos: árbol (padre / hijas) y sus activos (solo en las hojas).
 AssetCategory.belongsTo(AssetCategory, { foreignKey: 'parentId', as: 'parent' });
@@ -77,6 +82,7 @@ export {
   Warehouse,
   MovementHeader,
   MovementLine,
+  MovementDocument,
   AssetCategory,
   Asset,
   AuthEvent,

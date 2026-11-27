@@ -66,10 +66,13 @@ const cleanup = async () => {
   await sequelize.transaction(async (transaction) => {
     const q = (sql, replacements) => sequelize.query(sql, { replacements, transaction });
     const testHeaders = `SELECT h.id FROM movement_headers h JOIN users u ON u.id = h.created_by_user_id WHERE u.username LIKE 'test.%'`;
+    await q('ALTER TABLE movement_documents DISABLE TRIGGER trg_movement_documents_rules');
     await q('ALTER TABLE movement_lines DISABLE TRIGGER trg_movements_immutable');
     await q('ALTER TABLE movement_headers DISABLE TRIGGER trg_movements_immutable');
+    await q(`DELETE FROM movement_documents WHERE movement_header_id IN (${testHeaders})`);
     await q(`DELETE FROM movement_lines WHERE movement_header_id IN (${testHeaders})`);
     await q(`DELETE FROM movement_headers WHERE id IN (${testHeaders})`);
+    await q('ALTER TABLE movement_documents ENABLE TRIGGER trg_movement_documents_rules');
     await q('ALTER TABLE movement_lines ENABLE TRIGGER trg_movements_immutable');
     await q('ALTER TABLE movement_headers ENABLE TRIGGER trg_movements_immutable');
   });

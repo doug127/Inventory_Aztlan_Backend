@@ -1,4 +1,6 @@
+import Decimal from 'decimal.js';
 import { z } from 'zod';
+import { RECEIPT_DOCUMENT_PREFIXES } from '#src/shared/constants/movements.js';
 
 const Quantity = z.string().regex(/^\d+\.\d{3}$/);
 const WarehouseRef = z.object({ id: z.number().int(), code: z.string(), name: z.string() });
@@ -19,6 +21,55 @@ export const MovementLineDto = z.object({
   note: z.string().nullable(),
 });
 
+/** Documento de recepción (factura, vale, recibo…). `file` es null mientras no se adjunte el archivo. */
+export const MovementDocumentDto = z.object({
+  id: z.number().int(),
+  documentType: z.string(),
+  documentNumber: z.string(),
+  // Prefijo del tipo + número, como en la referencia de la entrada: FAC-0012345.
+  label: z.string(),
+  supplierName: z.string().nullable(),
+  supplierTaxId: z.string().nullable(),
+  issueDate: z.string().regex(/^\d{4}-\d{2}-\d{2}$/).nullable(),
+  totalAmount: z.string().regex(/^\d+\.\d{2}$/).nullable(),
+  currency: z.string().nullable(),
+  file: z
+    .object({
+      name: z.string(),
+      mimeType: z.string(),
+      sizeBytes: z.number().int(),
+      sha256: z.string(),
+      uploadedAt: z.date(),
+      uploadedBy: z.object({ id: z.number().int(), fullName: z.string() }),
+    })
+    .nullable(),
+  createdAt: z.date(),
+});
+
+export const toMovementDocumentDto = (doc) =>
+  MovementDocumentDto.parse({
+    id: doc.id,
+    documentType: doc.documentType,
+    documentNumber: doc.documentNumber,
+    label: `${RECEIPT_DOCUMENT_PREFIXES[doc.documentType] ?? doc.documentType}-${doc.documentNumber}`,
+    supplierName: doc.supplierName ?? null,
+    supplierTaxId: doc.supplierTaxId ?? null,
+    issueDate: doc.issueDate ?? null,
+    totalAmount: doc.totalAmount === null || doc.totalAmount === undefined ? null : new Decimal(doc.totalAmount).toFixed(2),
+    currency: doc.currency ?? null,
+    file: doc.fileStorageKey
+      ? {
+          name: doc.fileOriginalName,
+          mimeType: doc.fileMimeType,
+          sizeBytes: doc.fileSizeBytes,
+          sha256: doc.fileSha256,
+          uploadedAt: new Date(doc.fileUploadedAt),
+          uploadedBy: { id: doc.fileUploadedBy.id, fullName: doc.fileUploadedBy.fullName },
+        }
+      : null,
+    createdAt: new Date(doc.createdAt),
+  });
+
 export const MovementDto = z.object({
   id: z.number().int(),
   documentNumber: z.string(),
@@ -34,6 +85,8 @@ export const MovementDto = z.object({
   receivedBy: z.string().nullable(),
   note: z.string().nullable(),
   lines: z.array(MovementLineDto),
+  // Documentos de recepción (solo en entradas; vacío en el resto).
+  documents: z.array(MovementDocumentDto),
   // Total por producto sumando sus líneas (resumen de la orden y de la impresión).
   totals: z.array(z.object({ product: ProductRef, quantity: Quantity, lines: z.number().int() })),
 });
@@ -86,6 +139,7 @@ export const toMovementDto = (movement) => {
     receivedBy: movement.receivedBy ?? null,
     note: movement.note ?? null,
     lines,
+    documents: (movement.documents ?? []).map(toMovementDocumentDto),
     totals: [...totals.values()].map((t) => ({ product: t.product, quantity: fromThousandths(t.thousandths), lines: t.lines })),
   });
 };

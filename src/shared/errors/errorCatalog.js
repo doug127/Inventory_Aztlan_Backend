@@ -32,6 +32,11 @@ export const ERROR_CATALOG = Object.freeze({
   // insertar, no lanza error: devuelve el movimiento original con 200.
   DUPLICATE_REQUEST:             { status: 409, message: 'La solicitud ya fue procesada' },
 
+  // Documentos de recepción de las entradas (facturas, vales, recibos) y su archivo adjunto
+  DOCUMENT_FILE_EXISTS:          { status: 409, message: 'El documento ya tiene su archivo adjunto' },
+  DOCUMENT_FILE_INVALID:         { status: 400, message: 'El archivo debe ser un PDF o una imagen JPG, PNG o WEBP' },
+  DOCUMENT_FILE_TOO_LARGE:       { status: 413, message: 'El archivo supera el tamaño máximo de 10 MB' },
+
   // Catálogos
   NOT_FOUND:                     { status: 404, message: 'Recurso no encontrado' },
   INACTIVE_RESOURCE:             { status: 409, message: 'El recurso está desactivado' },

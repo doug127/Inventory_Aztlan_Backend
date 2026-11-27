@@ -50,3 +50,37 @@ export const ENTRY_REASONS = ['COMPRA', 'OTRO'];
 
 /** Días de atraso que puede registrar un ALMACENISTA (§4 regla 2). */
 export const BACKDATE_DAYS_ALMACENISTA = 3;
+
+/**
+ * Documentos de recepción de una entrada (tabla movement_documents, chk_movement_documents_type) y el
+ * prefijo con el que forman la referencia de la entrada (naming_conventions.md §8.2): FAC-0012345.
+ */
+export const RECEIPT_DOCUMENT_TYPES = {
+  FACTURA: 'FACTURA',
+  VALE: 'VALE',
+  RECIBO: 'RECIBO',
+  NOTA_ENTREGA: 'NOTA_ENTREGA',
+  GUIA_DESPACHO: 'GUIA_DESPACHO',
+  ORDEN_COMPRA: 'ORDEN_COMPRA',
+};
+
+export const RECEIPT_DOCUMENT_PREFIXES = {
+  FACTURA: 'FAC',
+  VALE: 'VAL',
+  RECIBO: 'REC',
+  NOTA_ENTREGA: 'NE',
+  GUIA_DESPACHO: 'GD',
+  ORDEN_COMPRA: 'OC',
+};
+
+/** Documentos por entrada. */
+export const MAX_RECEIPT_DOCUMENTS = 10;
+
+/** Archivo adjunto de un documento: PDF o foto, hasta 10 MB (chk_movement_documents_file_*). */
+export const RECEIPT_FILE_MIME_TYPES = {
+  'application/pdf': '.pdf',
+  'image/jpeg': '.jpg',
+  'image/png': '.png',
+  'image/webp': '.webp',
+};
+export const RECEIPT_FILE_MAX_BYTES = 10 * 1024 * 1024;

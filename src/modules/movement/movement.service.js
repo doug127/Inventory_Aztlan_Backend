@@ -6,6 +6,7 @@
 //  - P5 Sin stock negativo: si la suma de las líneas de un producto supera la existencia, no se registra nada.
 //  - P6 Idempotencia: una solicitud repetida con el mismo Idempotency-Key devuelve el movimiento original.
 // El rol mínimo (ALMACENISTA) lo exige la ruta; la regla de fechas por rol, este service.
+import { createHash, randomUUID } from 'node:crypto';
 import Decimal from 'decimal.js';
 import { AppError } from '#src/shared/errors/AppError.js';
 import { mapDatabaseError } from '#src/shared/errors/mapDatabaseError.js';
@@ -17,14 +18,19 @@ import {
   OUT_REASONS_REQUIRING_ASSET,
   OUT_REASONS_REQUIRING_NOTE,
   REASONS_BY_TYPE,
+  RECEIPT_DOCUMENT_PREFIXES,
+  RECEIPT_FILE_MAX_BYTES,
+  RECEIPT_FILE_MIME_TYPES,
 } from '#src/shared/constants/movements.js';
+import { ROLE_HIERARCHY } from '#src/shared/constants/roles.js';
+import * as fileStorage from '#src/shared/storage/fileStorage.js';
 import { assertWarehouseAvailable } from '#src/modules/warehouse/warehouse.service.js';
 import { assertProductAvailable } from '#src/modules/product/product.service.js';
 import { assertAssetAvailable } from '#src/modules/asset/asset.service.js';
 import * as stockRepository from '#src/modules/stock/stock.repository.js';
 import * as movementRepository from './movement.repository.js';
 import { QUANTITY_DECIMALS, consolidateLines, requiredByProduct, resolveMovementDate, sortedIds } from './movement.rules.js';
-import { toMovementDto } from './movement.dto.js';
+import { toMovementDocumentDto, toMovementDto } from './movement.dto.js';
 
 const fieldIssue = (path, message) => ({ location: 'body', path, message });
 const fixed = (value) => new Decimal(value).toFixed(QUANTITY_DECIMALS);
@@ -198,6 +204,34 @@ export const createWithdrawalOrder = async (input, { actor, idempotencyKey } = {
 
 // --- Entrada (IN, HU-402) -----------------------------------------------------------------
 
+/** 'AAAA-MM-DD' en la hora del servidor (las fechas de emisión son DATE, sin hora). */
+const isoDay = (d) => `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`;
+
+/**
+ * Documentos de recepción (factura, vale, recibo…): el mismo tipo y número no se repite en la entrada,
+ * y la fecha de emisión no puede ser futura. El formato lo valida el schema.
+ */
+const assertReceiptDocuments = (documents, now = new Date()) => {
+  const seen = new Map();
+  const issues = [];
+  documents.forEach((doc, i) => {
+    const key = `${doc.documentType}|${doc.documentNumber}`;
+    if (seen.has(key)) issues.push(fieldIssue(`documents.${i}.documentNumber`, `Es el mismo documento ${seen.get(key) + 1}`));
+    else seen.set(key, i);
+    if (doc.issueDate && doc.issueDate > isoDay(now)) issues.push(fieldIssue(`documents.${i}.issueDate`, 'La fecha de emisión no puede ser futura'));
+  });
+  if (issues.length) {
+    throw new AppError('VALIDATION_ERROR', { message: issues.length === 1 ? issues[0].message : 'Revise los documentos de recepción', details: issues });
+  }
+};
+
+/** Referencia de la entrada: la escrita o, si no hay, la del primer documento (FAC-0012345). */
+export const entryReference = (input) => {
+  if (input.reference) return input.reference;
+  const [first] = input.documents ?? [];
+  return first ? `${RECEIPT_DOCUMENT_PREFIXES[first.documentType]}-${first.documentNumber}` : null;
+};
+
 /**
  * Reglas de la entrada que no necesitan la base de datos (business_rules.md §2.2 y §3).
  *  - Motivos COMPRA y OTRO. La DEVOLUCION de un préstamo llega con HU-405 (valida lo pendiente por activo).
@@ -223,6 +257,7 @@ const assertEntryShape = (input) => {
     const message = 'Las correcciones (REV-) las registra un administrador desde el movimiento original';
     throw new AppError('VALIDATION_ERROR', { message, details: [fieldIssue('reference', message)] });
   }
+  assertReceiptDocuments(input.documents ?? []);
   const withAsset = input.lines.map((line, i) => ({ line: i + 1, assetId: line.assetId })).filter((l) => l.assetId);
   if (withAsset.length) {
     throw new AppError('ASSET_NOT_ALLOWED', {
@@ -266,7 +301,7 @@ export const createEntry = async (input, { actor, idempotencyKey } = {}) =>
           documentNumber,
           movementType: MOVEMENT_TYPES.IN,
           reason: input.reason,
-          reference: input.reference ?? null,
+          reference: entryReference(input),
           workOrder: null,
           movementDate,
           createdByUserId: actor.id,
@@ -276,6 +311,15 @@ export const createEntry = async (input, { actor, idempotencyKey } = {}) =>
           note: input.note ?? null,
           idempotencyKey: idempotencyKey ?? null,
           lines: lines.map((l) => ({ productId: l.productId, assetId: null, quantity: fixed(l.quantity), note: l.note })),
+          documents: (input.documents ?? []).map((doc) => ({
+            documentType: doc.documentType,
+            documentNumber: doc.documentNumber,
+            supplierName: doc.supplierName,
+            supplierTaxId: doc.supplierTaxId,
+            issueDate: doc.issueDate,
+            totalAmount: doc.totalAmount,
+            currency: doc.currency,
+          })),
         },
         { transaction }
       );
@@ -287,3 +331,81 @@ export const createEntry = async (input, { actor, idempotencyKey } = {}) =>
 
     return { id: created.id, warnings: { aboveMaximum: created.aboveMaximum, consolidated: consolidatedWarning(lines) } };
   });
+
+// --- Archivo de un documento de recepción --------------------------------------------------
+
+const DOCUMENT_FILES_AREA = 'receipt-documents';
+
+/** Firma de cada tipo permitido: el Content-Type declarado debe coincidir con el contenido real. */
+const FILE_SIGNATURES = {
+  'application/pdf': (b) => b.subarray(0, 5).toString('latin1') === '%PDF-',
+  'image/jpeg': (b) => b.length > 3 && b[0] === 0xff && b[1] === 0xd8 && b[2] === 0xff,
+  'image/png': (b) => b.subarray(0, 8).equals(Buffer.from([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a])),
+  'image/webp': (b) => b.subarray(0, 4).toString('latin1') === 'RIFF' && b.subarray(8, 12).toString('latin1') === 'WEBP',
+};
+
+const findDocumentOrFail = async (movementId, documentId, options) => {
+  const doc = await movementRepository.findDocument(movementId, documentId, options);
+  if (!doc) throw new AppError('NOT_FOUND', { message: `Documento ${documentId} no encontrado en el movimiento ${movementId}` });
+  return doc;
+};
+
+const alreadyAttached = (doc) => new AppError('DOCUMENT_FILE_EXISTS', { message: `El documento ${doc.documentNumber} ya tiene su archivo adjunto` });
+
+/**
+ * Adjunta el archivo escaneado (PDF o foto) a un documento de recepción. Solo quien registró la entrada
+ * o un ADMIN o superior, y una sola vez: el documento es parte de un movimiento inmutable.
+ * El archivo se escribe en disco antes de la transacción y se borra si la transacción falla.
+ * file: { buffer, mimeType, originalName }. Devuelve el documento (DTO).
+ */
+export const attachDocumentFile = async (movementId, documentId, file, { actor }) => {
+  const doc = await findDocumentOrFail(movementId, documentId);
+  if (doc.header.createdByUserId !== actor.id && actor.hierarchy > ROLE_HIERARCHY.ADMIN) {
+    throw new AppError('FORBIDDEN_ROLE', { message: 'Solo quien registró la entrada o un administrador adjunta sus documentos' });
+  }
+  if (doc.fileStorageKey) throw alreadyAttached(doc);
+
+  const { buffer, mimeType, originalName } = file;
+  if (!Buffer.isBuffer(buffer) || buffer.length === 0) throw new AppError('DOCUMENT_FILE_INVALID', { message: 'El archivo está vacío' });
+  if (buffer.length > RECEIPT_FILE_MAX_BYTES) throw new AppError('DOCUMENT_FILE_TOO_LARGE');
+  if (!Object.hasOwn(RECEIPT_FILE_MIME_TYPES, mimeType) || !FILE_SIGNATURES[mimeType](buffer)) {
+    throw new AppError('DOCUMENT_FILE_INVALID', { message: 'El contenido del archivo no corresponde a un PDF, JPG, PNG o WEBP' });
+  }
+
+  const storageKey = `${randomUUID()}${RECEIPT_FILE_MIME_TYPES[mimeType]}`;
+  await fileStorage.saveFile(DOCUMENT_FILES_AREA, storageKey, buffer);
+  try {
+    await withTransaction(async (transaction) => {
+      // FOR UPDATE: dos subidas simultáneas al mismo documento no adjuntan dos archivos.
+      const locked = await findDocumentOrFail(movementId, documentId, { transaction, lock: true });
+      if (locked.fileStorageKey) throw alreadyAttached(locked);
+      await movementRepository.attachDocumentFile(
+        documentId,
+        {
+          fileStorageKey: storageKey,
+          fileOriginalName: originalName,
+          fileMimeType: mimeType,
+          fileSizeBytes: buffer.length,
+          fileSha256: createHash('sha256').update(buffer).digest('hex'),
+          fileUploadedAt: new Date(),
+          fileUploadedByUserId: actor.id,
+        },
+        { transaction }
+      );
+    });
+  } catch (error) {
+    await fileStorage.removeFile(DOCUMENT_FILES_AREA, storageKey);
+    throw error;
+  }
+  return toMovementDocumentDto(await findDocumentOrFail(movementId, documentId));
+};
+
+/** Archivo de un documento para descargarlo: { buffer, mimeType, name }. Lo consultan todos los roles. */
+export const getDocumentFile = async (movementId, documentId) => {
+  const doc = await findDocumentOrFail(movementId, documentId);
+  if (!doc.fileStorageKey) throw new AppError('NOT_FOUND', { message: `El documento ${doc.documentNumber} no tiene archivo adjunto` });
+  const buffer = await fileStorage.readStoredFile(DOCUMENT_FILES_AREA, doc.fileStorageKey);
+  // El registro existe pero el archivo no está en disco: falla del almacenamiento, no del cliente.
+  if (!buffer) throw new AppError('INTERNAL_ERROR', { message: `Falta en disco el archivo ${doc.fileStorageKey}` });
+  return { buffer, mimeType: doc.fileMimeType, name: doc.fileOriginalName, sha256: doc.fileSha256 };
+};
