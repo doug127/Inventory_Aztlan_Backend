@@ -63,16 +63,16 @@ const sameQuantity = (a, b) => (a === null || b === null ? a === b : new Decimal
 
 /** Lista paginada. categoryId incluye sus subcategorías (user_flow.md §4). */
 export const listProducts = async (query) => {
-  const { page, limit, search, sort, order, isActive, categoryId, unitId } = query;
+  const { page, limit, search, sort, order, isActive, categoryId, unitId, withStockIn } = query;
   const categoryIds = categoryId ? await getSubtreeIds(categoryId) : undefined;
   const { items, total } = await productRepository.listProducts({ ...query, categoryIds });
   return {
-    items: items.map(toProductDto),
+    items: items.map((item) => toProductDto(item, { warehouseId: withStockIn })),
     total,
     page,
     limit,
     search: search ?? null,
-    filters: Object.fromEntries(Object.entries({ isActive, categoryId, unitId }).filter(([, v]) => v !== undefined)),
+    filters: Object.fromEntries(Object.entries({ isActive, categoryId, unitId, withStockIn }).filter(([, v]) => v !== undefined)),
     sort: { field: sort, order },
   };
 };

@@ -114,6 +114,25 @@ describe('Consultas (todos los roles)', () => {
     expect(res.body.data.every((p) => ['FERT', 'HERB', 'INSE', 'INSU'].includes(p.category.code))).toBe(true);
   });
 
+  it('withStockIn: solo los productos con existencia > 0 en ese almacén (origen de un traslado)', async () => {
+    const categoryId = (await one("INSERT INTO product_categories (code, name) VALUES ('ZPST', 'test.Productos con stock') RETURNING id")).id;
+    const product = async (name) => (await create({ name, categoryId, unitId: ids.litro })).body.data.id;
+    const withStock = await product('test.Con existencia en COMB');
+    const empty = await product('test.Con stock 0 en COMB');
+    const none = await product('test.Sin fila en COMB');
+    await setStock(withStock, '5.5');
+    await setStock(empty, '0');
+    const res = await api.get(`${BASE}?withStockIn=${ids.warehouse}&categoryId=${categoryId}&limit=100`, { token: almacenista });
+    expect(res.status).toBe(200);
+    const listed = res.body.data.map((p) => p.id);
+    expect(listed).toContain(withStock);
+    expect(res.body.data.find((p) => p.id === withStock).stock.inWarehouse).toEqual({ warehouseId: ids.warehouse, quantity: '5.500' });
+    expect(listed).not.toContain(empty);
+    expect(listed).not.toContain(none);
+    expect(res.body.meta.filters).toMatchObject({ withStockIn: ids.warehouse });
+    expect((await api.get(`${BASE}?withStockIn=abc`, { token: almacenista })).status).toBe(400);
+  });
+
   it('GET /:id inexistente → 404', async () => {
     expect((await api.get(`${BASE}/99999999`, { token: almacenista })).status).toBe(404);
   });

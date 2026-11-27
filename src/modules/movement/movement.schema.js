@@ -176,6 +176,22 @@ export const CreateEntrySchema = z
   })
   .strict();
 
+/**
+ * Traslado entre almacenes (TRANSFER, HU-403, business_rules.md §2.4). El motivo es siempre TRASLADO
+ * y no se envía. Origen ≠ destino lo valida el service (INVALID_MOVEMENT_WAREHOUSES).
+ */
+export const CreateTransferSchema = z
+  .object({
+    warehouseFromId: idField('warehouseFromId'),
+    warehouseToId: idField('warehouseToId'),
+    movementDate: movementDateField,
+    // Quien lleva físicamente la mercancía (chofer). Opcional.
+    receivedBy: optionalText('Trasladado por', 150),
+    note: optionalText('La observación', 1000),
+    lines: z.array(LineSchema, { error: 'lines debe ser una lista' }).max(100, 'Un traslado admite hasta 100 líneas'),
+  })
+  .strict();
+
 export const MovementIdParamsSchema = z.object({
   id: z.coerce.number({ error: 'El id debe ser un número' }).int('El id debe ser un entero').positive('El id debe ser positivo'),
 });

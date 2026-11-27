@@ -1,4 +1,5 @@
-// Movimientos de inventario (business_rules.md §1 a §4). HU-401: orden de retiro (OUT); HU-402: entrada (IN).
+// Movimientos de inventario (business_rules.md §1 a §4). HU-401: orden de retiro (OUT); HU-402: entrada (IN);
+// HU-403: traslado entre almacenes (TRANSFER).
 // Principios que se cumplen aquí:
 //  - P3 Todo o nada: número de documento, cabecera, líneas y stock en una sola transacción.
 //  - P4 Bloqueo de filas: las filas de stock se bloquean FOR UPDATE en orden ascendente de producto,
@@ -14,6 +15,7 @@ import { withTransaction } from '#src/shared/db/transaction.js';
 import {
   CORRECTION_REFERENCE_PREFIX,
   ENTRY_REASONS,
+  MOVEMENT_REASONS,
   MOVEMENT_TYPES,
   OUT_REASONS_REQUIRING_ASSET,
   OUT_REASONS_REQUIRING_NOTE,
@@ -330,6 +332,118 @@ export const createEntry = async (input, { actor, idempotencyKey } = {}) =>
     });
 
     return { id: created.id, warnings: { aboveMaximum: created.aboveMaximum, consolidated: consolidatedWarning(lines) } };
+  });
+
+// --- Traslado (TRANSFER, HU-403) -----------------------------------------------------------
+
+/**
+ * Reglas del traslado que no necesitan la base de datos (business_rules.md §2.4 y §3):
+ * origen y destino distintos, al menos una línea y ningún activo en las líneas
+ * (trg_movement_lines_asset_rule lo prohíbe en TRANSFER).
+ */
+const assertTransferShape = (input) => {
+  if (input.warehouseFromId === input.warehouseToId) {
+    const message = 'El almacén de destino debe ser distinto del de origen';
+    throw new AppError('INVALID_MOVEMENT_WAREHOUSES', { message, details: [fieldIssue('warehouseToId', message)] });
+  }
+  if (!input.lines.length) throw new AppError('EMPTY_MOVEMENT', { message: 'Agregue al menos una línea al traslado' });
+  const withAsset = input.lines.map((line, i) => ({ line: i + 1, assetId: line.assetId })).filter((l) => l.assetId);
+  if (withAsset.length) {
+    throw new AppError('ASSET_NOT_ALLOWED', {
+      message: `Las líneas de un traslado no llevan activo (línea ${withAsset.map((l) => l.line).join(', ')})`,
+      details: withAsset.map((l) => ({ location: 'body', path: `lines.${l.line - 1}.assetId`, message: 'Quite el activo', line: l.line })),
+    });
+  }
+};
+
+/**
+ * Traslado (TRANSFER, HU-403): resta en el origen y suma en el destino en una sola transacción, sin
+ * estado "en tránsito" (§2.4 regla 3). Valida la existencia del origen igual que la orden de retiro.
+ *
+ * Bloqueos (P4): el orden global es (almacén, producto) ascendente, el mismo que usan sin saberlo el
+ * retiro y la entrada (un solo almacén, productos ascendentes). Por eso se procesa primero el almacén
+ * de id menor: si es el destino, se suma antes de validar el origen (la transacción se revierte si
+ * falta stock). Así dos traslados cruzados A→B y B→A esperan uno al otro en vez de bloquearse.
+ * Devuelve { movement, duplicated, warnings: { consolidated } }.
+ */
+export const createTransfer = async (input, { actor, idempotencyKey } = {}) =>
+  runIdempotent({ idempotencyKey, actor, emptyWarnings: { consolidated: [] } }, async () => {
+    assertTransferShape(input);
+    const movementDate = resolveMovementDate(input, actor);
+    const lines = consolidateLines(input.lines);
+    const moved = requiredByProduct(lines);
+    const productIds = sortedIds([...moved.keys()]);
+
+    const createdId = await withTransaction(async (transaction) => {
+      // Los almacenes se bloquean FOR SHARE también en orden ascendente de id.
+      const [firstId, secondId] = sortedIds([input.warehouseFromId, input.warehouseToId]);
+      const roleOf = (id) => (id === input.warehouseFromId ? 'origen' : 'destino');
+      const first = await assertWarehouseAvailable(firstId, { transaction, role: roleOf(firstId) });
+      const second = await assertWarehouseAvailable(secondId, { transaction, role: roleOf(secondId) });
+      const from = first.id === input.warehouseFromId ? first : second;
+      const to = from === first ? second : first;
+
+      const products = new Map();
+      for (const id of productIds) products.set(id, await assertProductAvailable(id, { transaction }));
+
+      const addToDestination = async () => {
+        for (const productId of productIds) {
+          await stockRepository.incrementStock(to.id, productId, fixed(moved.get(productId)), { transaction });
+        }
+      };
+      const takeFromOrigin = async () => {
+        const stock = await stockRepository.lockStockRows(from.id, productIds, { transaction });
+        const shortages = productIds
+          .map((id) => ({ id, available: new Decimal(stock.get(id) ?? 0), requested: moved.get(id) }))
+          .filter((s) => s.available.lt(s.requested));
+        if (shortages.length) {
+          const [firstShortage] = shortages;
+          throw new AppError('INSUFFICIENT_STOCK', {
+            message: `Stock insuficiente de ${products.get(firstShortage.id).code} en ${from.code}: disponible ${fixed(firstShortage.available)}, solicitado ${fixed(firstShortage.requested)}`,
+            details: shortages.map((s) => ({
+              productId: s.id,
+              productCode: products.get(s.id).code,
+              warehouseCode: from.code,
+              available: fixed(s.available),
+              requested: fixed(s.requested),
+            })),
+          });
+        }
+        for (const productId of productIds) {
+          await stockRepository.decrementStock(from.id, productId, fixed(moved.get(productId)), { transaction });
+        }
+      };
+
+      if (to.id < from.id) {
+        await addToDestination();
+        await takeFromOrigin();
+      } else {
+        await takeFromOrigin();
+        await addToDestination();
+      }
+
+      const documentNumber = await nextDocumentNumberOrFail(MOVEMENT_TYPES.TRANSFER, { transaction });
+      return movementRepository.createMovement(
+        {
+          documentNumber,
+          movementType: MOVEMENT_TYPES.TRANSFER,
+          reason: MOVEMENT_REASONS.TRASLADO,
+          reference: null,
+          workOrder: null,
+          movementDate,
+          createdByUserId: actor.id,
+          warehouseFromId: from.id,
+          warehouseToId: to.id,
+          receivedBy: input.receivedBy ?? null,
+          note: input.note ?? null,
+          idempotencyKey: idempotencyKey ?? null,
+          lines: lines.map((l) => ({ productId: l.productId, assetId: null, quantity: fixed(l.quantity), note: l.note })),
+        },
+        { transaction }
+      );
+    });
+
+    return { id: createdId, warnings: { consolidated: consolidatedWarning(lines) } };
   });
 
 // --- Archivo de un documento de recepción --------------------------------------------------

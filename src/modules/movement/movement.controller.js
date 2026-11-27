@@ -15,6 +15,16 @@ export const createEntryController = async (req, res) => {
   return sendOk(res, movement, { status: duplicated ? 200 : 201, meta: { duplicated, warnings } });
 };
 
+/** Traslado (HU-403): 201 con el nuevo; 200 con el original si el Idempotency-Key ya se usó. */
+export const createTransferController = async (req, res) => {
+  const { movement, duplicated, warnings } = await movementService.createTransfer(req.validated.body, {
+    actor: req.user,
+    idempotencyKey: req.validated.headers?.['idempotency-key'],
+  });
+  addLogContext(res, { doc: movement.documentNumber, lines: movement.lines.length, duplicated });
+  return sendOk(res, movement, { status: duplicated ? 200 : 201, meta: { duplicated, warnings } });
+};
+
 /** 201 con la orden nueva; 200 con la original si el Idempotency-Key ya se usó (meta.duplicated). */
 export const createWithdrawalController = async (req, res) => {
   const { movement, duplicated, warnings } = await movementService.createWithdrawalOrder(req.validated.body, {

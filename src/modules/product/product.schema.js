@@ -78,6 +78,8 @@ export const ListProductsQuerySchema = z.object({
   // Incluye las subcategorías (user_flow.md §4).
   categoryId: optionalId('categoryId'),
   unitId: optionalId('unitId'),
+  // Solo los productos con existencia (> 0) en ese almacén: origen de un traslado o de un retiro.
+  withStockIn: optionalId('withStockIn'),
   sort: z.enum(PRODUCT_SORT_FIELDS, { error: `sort debe ser uno de: ${PRODUCT_SORT_FIELDS.join(', ')}` }).default('code'),
   order: z.enum(['asc', 'desc'], { error: 'order debe ser asc o desc' }).default('asc'),
 });

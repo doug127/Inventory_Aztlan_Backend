@@ -7,6 +7,7 @@ import { ROLE_CODES } from '#src/shared/constants/roles.js';
 import { RECEIPT_FILE_MAX_BYTES, RECEIPT_FILE_MIME_TYPES } from '#src/shared/constants/movements.js';
 import {
   CreateEntrySchema,
+  CreateTransferSchema,
   CreateWithdrawalSchema,
   DocumentFileHeadersSchema,
   DocumentFileParamsSchema,
@@ -17,6 +18,7 @@ import {
 import {
   attachDocumentFileController,
   createEntryController,
+  createTransferController,
   createWithdrawalController,
   getDocumentFileController,
   getMovementController,
@@ -24,7 +26,7 @@ import {
 
 const router = Router();
 
-// Consultar: todos los roles. Registrar órdenes de retiro y entradas: ALMACENISTA o superior (business_rules.md
+// Consultar: todos los roles. Registrar órdenes de retiro, entradas y traslados: ALMACENISTA o superior (business_rules.md
 // §8.2). Los movimientos son inmutables: no hay PUT, PATCH ni DELETE (P1). La única excepción es adjuntar,
 // una vez, el archivo escaneado de un documento de recepción.
 router.use(auth);
@@ -40,6 +42,12 @@ router.post(
   authorizeRole(ROLE_CODES.ALMACENISTA),
   validate({ headers: IdempotencyHeadersSchema, body: CreateEntrySchema }),
   createEntryController
+);
+router.post(
+  '/transfers',
+  authorizeRole(ROLE_CODES.ALMACENISTA),
+  validate({ headers: IdempotencyHeadersSchema, body: CreateTransferSchema }),
+  createTransferController
 );
 router.get('/:id', validate({ params: MovementIdParamsSchema }), getMovementController);
 

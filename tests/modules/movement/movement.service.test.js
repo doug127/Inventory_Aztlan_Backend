@@ -244,6 +244,89 @@ describe('createEntry (HU-402)', () => {
   });
 });
 
+describe('createTransfer (HU-403)', () => {
+  const WAREHOUSES = { 2: { id: 2, code: 'COMB', isActive: true }, 5: { id: 5, code: 'PRIN', isActive: true } };
+  const transfer = (lines, overrides = {}) => ({ warehouseFromId: 2, warehouseToId: 5, note: null, lines, ...overrides });
+
+  /** Orden real de las llamadas a stock: [función, almacén, producto]. */
+  const stockCalls = () =>
+    [
+      ...stock.lockStockRows.mock.calls.map((c, i) => ({ order: stock.lockStockRows.mock.invocationCallOrder[i], call: ['lock', c[0], c[1]] })),
+      ...stock.decrementStock.mock.calls.map((c, i) => ({ order: stock.decrementStock.mock.invocationCallOrder[i], call: ['dec', c[0], c[1], c[2]] })),
+      ...stock.incrementStock.mock.calls.map((c, i) => ({ order: stock.incrementStock.mock.invocationCallOrder[i], call: ['inc', c[0], c[1], c[2]] })),
+    ]
+      .sort((a, b) => a.order - b.order)
+      .map((x) => x.call);
+
+  beforeEach(() => {
+    repo.nextDocumentNumber.mockResolvedValue('TRF-000010');
+    assertWarehouseAvailable.mockImplementation(async (id) => WAREHOUSES[id]);
+  });
+
+  it('origen de id menor: bloquea y resta en el origen, luego suma en el destino; TRF- con motivo TRASLADO', async () => {
+    const result = await service.createTransfer(
+      transfer([
+        { productId: 11, quantity: '4' },
+        { productId: 10, quantity: '100' },
+        { productId: 10, quantity: '50.5' },
+      ]),
+      { actor: ALMACENISTA }
+    );
+    expect(assertWarehouseAvailable.mock.calls).toEqual([
+      [2, { transaction: 'tx', role: 'origen' }],
+      [5, { transaction: 'tx', role: 'destino' }],
+    ]);
+    expect(stockCalls()).toEqual([
+      ['lock', 2, [10, 11]],
+      ['dec', 2, 10, '150.500'],
+      ['dec', 2, 11, '4.000'],
+      ['inc', 5, 10, '150.500'],
+      ['inc', 5, 11, '4.000'],
+    ]);
+    expect(repo.nextDocumentNumber).toHaveBeenCalledWith('TRANSFER', { transaction: 'tx' });
+    expect(repo.createMovement).toHaveBeenCalledWith(
+      expect.objectContaining({ movementType: 'TRANSFER', reason: 'TRASLADO', warehouseFromId: 2, warehouseToId: 5, reference: null, documentNumber: 'TRF-000010' }),
+      { transaction: 'tx' }
+    );
+    expect(result.warnings).toEqual({ consolidated: [{ productId: 10, assetId: null, lines: [2, 3] }] });
+  });
+
+  it('destino de id menor: suma primero en el destino y después valida el origen (orden global por almacén, sin deadlocks)', async () => {
+    await service.createTransfer(transfer([{ productId: 10, quantity: '10' }], { warehouseFromId: 5, warehouseToId: 2 }), { actor: ALMACENISTA });
+    expect(assertWarehouseAvailable.mock.calls.map((c) => c[0])).toEqual([2, 5]);
+    expect(stockCalls()).toEqual([
+      ['inc', 2, 10, '10.000'],
+      ['lock', 5, [10]],
+      ['dec', 5, 10, '10.000'],
+    ]);
+    expect(repo.createMovement).toHaveBeenCalledWith(expect.objectContaining({ warehouseFromId: 5, warehouseToId: 2 }), { transaction: 'tx' });
+  });
+
+  it('la suma de las líneas supera la existencia del origen → INSUFFICIENT_STOCK sin numerar ni registrar', async () => {
+    await expect(service.createTransfer(transfer([{ productId: 10, quantity: '200' }, { productId: 10, quantity: '150' }]), { actor: ALMACENISTA })).rejects.toMatchObject({
+      code: 'INSUFFICIENT_STOCK',
+      details: [expect.objectContaining({ productCode: 'COMB-0001', warehouseCode: 'COMB', available: '300.000', requested: '350.000' })],
+    });
+    expect(stock.decrementStock).not.toHaveBeenCalled();
+    expect(repo.nextDocumentNumber).not.toHaveBeenCalled();
+    expect(repo.createMovement).not.toHaveBeenCalled();
+  });
+
+  it('reglas de forma antes de abrir la transacción: mismo almacén, sin líneas, activo en una línea', async () => {
+    const reject = (input) => service.createTransfer(input, { actor: ALMACENISTA });
+    await expect(reject(transfer([{ productId: 10, quantity: '1' }], { warehouseToId: 2 }))).rejects.toMatchObject({
+      code: 'INVALID_MOVEMENT_WAREHOUSES',
+      details: [expect.objectContaining({ path: 'warehouseToId' })],
+    });
+    await expect(reject(transfer([]))).rejects.toMatchObject({ code: 'EMPTY_MOVEMENT' });
+    await expect(reject(transfer([{ productId: 10, quantity: '1' }, { productId: 11, quantity: '1', assetId: 3 }]))).rejects.toMatchObject({
+      code: 'ASSET_NOT_ALLOWED',
+      details: [expect.objectContaining({ path: 'lines.1.assetId', line: 2 })],
+    });
+    expect(assertWarehouseAvailable).not.toHaveBeenCalled();
+  });
+});
+
 describe('documentos de recepción de la entrada', () => {
   const entry = (documents, overrides = {}) => ({
     warehouseId: 5,

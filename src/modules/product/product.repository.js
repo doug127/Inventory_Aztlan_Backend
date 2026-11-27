@@ -23,18 +23,28 @@ const SORT_COLUMNS = { code: ['code'], name: ['name'], createdAt: ['createdAt'] 
 const escapeLike = (text) => text.replace(/[\\%_]/g, (ch) => `\\${ch}`);
 
 /** Lista paginada. categoryIds: la categoría filtrada y sus subcategorías (las resuelve el service). */
-export const listProducts = async ({ page, limit, search, isActive, categoryIds, unitId, sort, order }) => {
+export const listProducts = async ({ page, limit, search, isActive, categoryIds, unitId, withStockIn, sort, order }) => {
   const and = [];
   if (isActive !== undefined) and.push({ isActive });
   if (categoryIds) and.push({ productCategoryId: categoryIds });
   if (unitId) and.push({ unitId });
+  // withStockIn llega validado como entero positivo (schema); Number() lo garantiza en el SQL.
+  const warehouseId = withStockIn ? Number(withStockIn) : null;
+  if (warehouseId) {
+    and.push({ id: { [Op.in]: sequelize.literal(`(SELECT s.product_id FROM stock s WHERE s.warehouse_id = ${warehouseId} AND s.quantity > 0)`) } });
+  }
   if (search) {
     const pattern = `%${escapeLike(search)}%`;
     and.push({ [Op.or]: [{ code: { [Op.iLike]: pattern } }, { name: { [Op.iLike]: pattern } }] });
   }
   const { rows, count } = await Product.findAndCountAll({
     where: and.length ? { [Op.and]: and } : {},
-    attributes: { include: USAGE_ATTRIBUTES },
+    // Con withStockIn, también la existencia en ese almacén (el buscador de un retiro o traslado la muestra).
+    attributes: {
+      include: warehouseId
+        ? [...USAGE_ATTRIBUTES, [sequelize.literal(`(SELECT s.quantity FROM stock s WHERE s.product_id = "Product".id AND s.warehouse_id = ${warehouseId})`), 'stockInWarehouse']]
+        : USAGE_ATTRIBUTES,
+    },
     include: INCLUDE,
     order: [[...SORT_COLUMNS[sort], order === 'desc' ? 'DESC' : 'ASC'], ['id', 'ASC']],
     limit,
