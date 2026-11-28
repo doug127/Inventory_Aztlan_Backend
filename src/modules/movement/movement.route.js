@@ -11,6 +11,7 @@ import {
   CreateEntrySchema,
   CreateTransferSchema,
   CreateWithdrawalSchema,
+  ListMovementsQuerySchema,
   ListPendingLoansQuerySchema,
   DocumentFileHeadersSchema,
   DocumentFileParamsSchema,
@@ -27,6 +28,7 @@ import {
   createWithdrawalController,
   getDocumentFileController,
   getMovementController,
+  listMovementsController,
   listPendingLoansController,
 } from './movement.controller.js';
 
@@ -62,7 +64,8 @@ router.post(
   validate({ headers: IdempotencyHeadersSchema, body: CreateAdjustmentSchema }),
   createAdjustmentController
 );
-// Préstamos pendientes de devolver (HU-405): todos los roles. Va antes de /:id.
+// Historial (HU-408) y préstamos pendientes (HU-405): todos los roles. Van antes de /:id.
+router.get('/', validate({ query: ListMovementsQuerySchema }), listMovementsController);
 router.get('/loans/pending', validate({ query: ListPendingLoansQuerySchema }), listPendingLoansController);
 router.get('/:id', validate({ params: MovementIdParamsSchema }), getMovementController);
 // Corrección con un movimiento inverso (REV-{documento}): solo ADMIN y SUPERADMIN (business_rules.md §5).

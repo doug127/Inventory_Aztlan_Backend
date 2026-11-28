@@ -186,3 +186,42 @@ export const toPendingLoanDto = (row) =>
       warehouse: { id: row.warehouseId, code: row.warehouseCode, name: row.warehouseName },
     },
   });
+
+/** Fila del historial de movimientos (HU-408): la cabecera, sin las líneas. */
+export const MovementSummaryDto = z.object({
+  id: z.number().int(),
+  documentNumber: z.string(),
+  movementType: z.enum(['IN', 'OUT', 'TRANSFER', 'ADJUST']),
+  reason: z.string(),
+  reference: z.string().nullable(),
+  workOrder: z.string().nullable(),
+  movementDate: z.date(),
+  createdBy: z.object({ id: z.number().int(), fullName: z.string() }),
+  fromWarehouse: WarehouseRef.nullable(),
+  toWarehouse: WarehouseRef.nullable(),
+  receivedBy: z.string().nullable(),
+  note: z.string().nullable(),
+  lineCount: z.number().int(),
+  // Correcciones (HU-406): si es una corrección (REV-) y cuántas correcciones tiene.
+  isCorrection: z.boolean(),
+  correctionCount: z.number().int(),
+});
+
+export const toMovementSummaryDto = (row) =>
+  MovementSummaryDto.parse({
+    id: row.id,
+    documentNumber: row.documentNumber,
+    movementType: row.movementType,
+    reason: row.reason,
+    reference: row.reference ?? null,
+    workOrder: row.workOrder ?? null,
+    movementDate: new Date(row.movementDate),
+    createdBy: { id: row.userId, fullName: row.userFullName },
+    fromWarehouse: row.fromId ? { id: row.fromId, code: row.fromCode, name: row.fromName } : null,
+    toWarehouse: row.toId ? { id: row.toId, code: row.toCode, name: row.toName } : null,
+    receivedBy: row.receivedBy ?? null,
+    note: row.note ?? null,
+    lineCount: row.lineCount,
+    isCorrection: (row.reference ?? '').startsWith('REV-'),
+    correctionCount: row.correctionCount,
+  });

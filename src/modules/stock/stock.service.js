@@ -5,7 +5,8 @@ import { AppError } from '#src/shared/errors/AppError.js';
 import { getWarehouse } from '#src/modules/warehouse/warehouse.service.js';
 import * as stockRepository from './stock.repository.js';
 import { getSubtreeIds } from '#src/modules/product/product_category/product_category.service.js';
-import { toAvailabilityDto, toStockRowDto, toStockSummaryDto } from './stock.dto.js';
+import { getProduct } from '#src/modules/product/product.service.js';
+import { toAvailabilityDto, toKardexRowDto, toKardexSummaryDto, toStockRowDto, toStockSummaryDto } from './stock.dto.js';
 
 /** Existencia de los productos indicados en el almacén (0 si nunca tuvieron). */
 export const getAvailability = async ({ warehouseId, productIds }) => {
@@ -39,5 +40,31 @@ export const listStock = async (query) => {
     filters: Object.fromEntries(Object.entries({ warehouseId, categoryId, alert, groupBy }).filter(([, v]) => v !== undefined)),
     sort: { field: 'productCode', order: 'asc' },
     summary: toStockSummaryDto(summary),
+  };
+};
+
+/**
+ * Kardex de un producto (HU-409, user_flow.md §10), en un almacén o en todos, del más antiguo al más
+ * reciente. El saldo de cada fila es el acumulado real (no depende de la página ni del rango); summary
+ * trae el saldo inicial, las entradas, las salidas y el saldo final del período. Un producto o almacén
+ * inexistente responde 404. meta.summary.product y .warehouse identifican lo consultado.
+ */
+export const getKardex = async (query) => {
+  const { productId, warehouseId, from, to, page, limit } = query;
+  const product = await getProduct(productId);
+  const warehouse = warehouseId ? await getWarehouse(warehouseId) : null;
+  const { items, total, summary } = await stockRepository.findKardex({ productId, warehouseId, from, to, page, limit });
+  return {
+    items: items.map(toKardexRowDto),
+    total,
+    page,
+    limit,
+    filters: Object.fromEntries(Object.entries({ productId, warehouseId, from, to }).filter(([, v]) => v !== undefined)),
+    sort: { field: 'movementDate', order: 'asc' },
+    summary: {
+      product: { id: product.id, code: product.code, name: product.name, unitCode: product.unit.code },
+      warehouse: warehouse ? { id: warehouse.id, code: warehouse.code, name: warehouse.name } : null,
+      ...toKardexSummaryDto(summary),
+    },
   };
 };

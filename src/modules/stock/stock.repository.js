@@ -145,3 +145,53 @@ export const listStock = async ({ groupBy, page, limit, search, warehouseId, cat
   ]);
   return { items: rows, total, summary: summaryRows };
 };
+
+// --- Kardex (HU-409) -----------------------------------------------------------------------------
+
+/**
+ * Orden cronológico del kardex: fecha, movimiento y, dentro de un movimiento, las salidas antes que
+ * las entradas (en un traslado con todos los almacenes, primero sale del origen y luego entra al destino).
+ */
+const KARDEX_ORDER = 'k.movement_date, k.movement_id, k.delta, k.asset_id NULLS FIRST, k.warehouse_id';
+
+/**
+ * Kardex de un producto (v_kardex), en un almacén o en todos. El saldo se acumula sobre toda la
+ * historia y después se filtra por fechas y se pagina: es correcto en cualquier página y rango.
+ * from/to: 'AAAA-MM-DD' inclusive. Devuelve { items, total, summary: { opening, inQty, outQty } }.
+ */
+export const findKardex = async ({ productId, warehouseId, from, to, page, limit }) => {
+  const scope = `k.product_id = :productId${warehouseId ? ' AND k.warehouse_id = :warehouseId' : ''}`;
+  const range = [from && 'x.movement_date >= CAST(:from AS date)', to && 'x.movement_date < CAST(:to AS date) + 1'].filter(Boolean);
+  const rangeWhere = range.length ? `WHERE ${range.join(' AND ')}` : '';
+  const replacements = { productId, warehouseId, from, to, limit, offset: (page - 1) * limit };
+  const running = `
+    SELECT k.*, sum(k.delta) OVER (ORDER BY ${KARDEX_ORDER} ROWS UNBOUNDED PRECEDING) AS balance,
+           row_number() OVER (ORDER BY ${KARDEX_ORDER}) AS rn
+    FROM v_kardex k WHERE ${scope}`;
+  const [items, [summary]] = await Promise.all([
+    sequelize.query(
+      `SELECT x.movement_id AS "movementId", x.document_number AS "documentNumber", x.movement_date AS "movementDate",
+              x.movement_type AS "movementType", x.reason, h.reference,
+              x.delta::text AS delta, x.balance::text AS balance,
+              w.id AS "warehouseId", w.code AS "warehouseCode", w.name AS "warehouseName",
+              a.id AS "assetId", a.code AS "assetCode", a.name AS "assetName"
+       FROM (${running}) x
+       JOIN movement_headers h ON h.id = x.movement_id
+       JOIN warehouses w ON w.id = x.warehouse_id
+       LEFT JOIN assets a ON a.id = x.asset_id
+       ${rangeWhere}
+       ORDER BY x.rn
+       LIMIT :limit OFFSET :offset`,
+      { replacements, type: QueryTypes.SELECT }
+    ),
+    sequelize.query(
+      `SELECT count(*) FILTER (WHERE ${range.length ? range.join(' AND ') : 'true'})::int AS total,
+              COALESCE(sum(x.delta) FILTER (WHERE ${from ? 'x.movement_date < CAST(:from AS date)' : 'false'}), 0)::text AS opening,
+              COALESCE(sum(x.delta) FILTER (WHERE x.delta > 0 AND ${range.length ? range.join(' AND ') : 'true'}), 0)::text AS "inQty",
+              COALESCE(-sum(x.delta) FILTER (WHERE x.delta < 0 AND ${range.length ? range.join(' AND ') : 'true'}), 0)::text AS "outQty"
+       FROM v_kardex x WHERE ${scope.replaceAll('k.', 'x.')}`,
+      { replacements, type: QueryTypes.SELECT }
+    ),
+  ]);
+  return { items, total: summary.total, summary: { opening: summary.opening, inQty: summary.inQty, outQty: summary.outQty } };
+};

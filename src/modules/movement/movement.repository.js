@@ -235,3 +235,59 @@ export const findCorrectionsOf = async (documentNumber, { transaction } = {}) =>
 /** id y número del movimiento con ese número de documento, o null. */
 export const findByDocumentNumber = async (documentNumber, { transaction } = {}) =>
   plain(await MovementHeader.findOne({ where: { documentNumber }, attributes: ['id', 'documentNumber'], transaction }));
+
+// --- Historial (HU-408) -------------------------------------------------------------------------
+
+/**
+ * Historial de movimientos, del más reciente al más antiguo, paginado. Filtros (todos opcionales):
+ * movementType, reason, warehouseId (origen o destino), from/to ('AAAA-MM-DD', ambos inclusive, en la
+ * zona horaria de la base), userId (quien registró), assetId y productId (alguna línea con ese activo
+ * o producto) y search (número de documento o referencia).
+ */
+export const listMovements = async ({ page, limit, movementType, reason, warehouseId, from, to, userId, assetId, productId, search }) => {
+  const where = [];
+  if (movementType) where.push('h.movement_type = :movementType');
+  if (reason) where.push('h.reason = :reason');
+  if (warehouseId) where.push('(h.warehouse_from_id = :warehouseId OR h.warehouse_to_id = :warehouseId)');
+  if (from) where.push('h.movement_date >= CAST(:from AS date)');
+  if (to) where.push("h.movement_date < CAST(:to AS date) + 1");
+  if (userId) where.push('h.created_by_user_id = :userId');
+  if (assetId) where.push('EXISTS (SELECT 1 FROM movement_lines l WHERE l.movement_header_id = h.id AND l.asset_id = :assetId)');
+  if (productId) where.push('EXISTS (SELECT 1 FROM movement_lines l WHERE l.movement_header_id = h.id AND l.product_id = :productId)');
+  if (search) where.push('(h.document_number ILIKE :pattern OR h.reference ILIKE :pattern)');
+  const filter = where.length ? `WHERE ${where.join(' AND ')}` : '';
+  const replacements = {
+    movementType,
+    reason,
+    warehouseId,
+    from,
+    to,
+    userId,
+    assetId,
+    productId,
+    pattern: search ? `%${search.replace(/[\%_]/g, (ch) => `\${ch}`)}%` : null,
+    limit,
+    offset: (page - 1) * limit,
+  };
+  const [rows, [{ total }]] = await Promise.all([
+    sequelize.query(
+      `SELECT h.id, h.document_number AS "documentNumber", h.movement_type AS "movementType", h.reason, h.reference,
+              h.work_order AS "workOrder", h.movement_date AS "movementDate", h.received_by AS "receivedBy", h.note,
+              u.id AS "userId", u.full_name AS "userFullName",
+              wf.id AS "fromId", wf.code AS "fromCode", wf.name AS "fromName",
+              wt.id AS "toId", wt.code AS "toCode", wt.name AS "toName",
+              (SELECT count(*)::int FROM movement_lines l WHERE l.movement_header_id = h.id) AS "lineCount",
+              (SELECT count(*)::int FROM movement_headers c WHERE c.reference = 'REV-' || h.document_number) AS "correctionCount"
+       FROM movement_headers h
+       JOIN users u ON u.id = h.created_by_user_id
+       LEFT JOIN warehouses wf ON wf.id = h.warehouse_from_id
+       LEFT JOIN warehouses wt ON wt.id = h.warehouse_to_id
+       ${filter}
+       ORDER BY h.movement_date DESC, h.id DESC
+       LIMIT :limit OFFSET :offset`,
+      { replacements, type: QueryTypes.SELECT }
+    ),
+    sequelize.query(`SELECT count(*)::int AS total FROM movement_headers h ${filter}`, { replacements, type: QueryTypes.SELECT }),
+  ]);
+  return { items: rows, total };
+};

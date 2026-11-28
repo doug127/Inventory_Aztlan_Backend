@@ -233,6 +233,29 @@ export const CreateAdjustmentSchema = z
 const optionalQueryId = (name) =>
   z.coerce.number({ error: `${name} debe ser un número` }).int(`${name} debe ser un entero`).positive(`${name} debe ser positivo`).optional();
 
+/** Fecha 'AAAA-MM-DD' de un filtro (sin hora). */
+const dayFilter = (name) => z.iso.date({ error: `${name} es una fecha AAAA-MM-DD` }).optional();
+
+/**
+ * Historial de movimientos (HU-408, user_flow.md §9). Todos los filtros son opcionales; from y to son
+ * inclusive. search busca en el número de documento y en la referencia.
+ */
+export const ListMovementsQuerySchema = z
+  .object({
+    page: z.coerce.number().int('page debe ser un entero').min(1, 'page debe ser mayor o igual a 1').default(1),
+    limit: z.coerce.number().int('limit debe ser un entero').min(1, 'limit mínimo 1').max(100, 'limit máximo 100').default(10),
+    search: z.string().trim().max(60, 'La búsqueda es demasiado larga').optional().transform((v) => v || undefined),
+    movementType: z.enum(['IN', 'OUT', 'TRANSFER', 'ADJUST'], { error: 'movementType es IN, OUT, TRANSFER o ADJUST' }).optional(),
+    reason: z.enum(Object.values(MOVEMENT_REASONS), { error: 'Motivo desconocido' }).optional(),
+    warehouseId: optionalQueryId('warehouseId'),
+    from: dayFilter('from'),
+    to: dayFilter('to'),
+    userId: optionalQueryId('userId'),
+    assetId: optionalQueryId('assetId'),
+    productId: optionalQueryId('productId'),
+  })
+  .refine((q) => !q.from || !q.to || q.from <= q.to, { error: 'La fecha inicial no puede ser posterior a la final', path: ['from'] });
+
 /** Préstamos pendientes (HU-405): por activo, por préstamo (sus pares activo-producto) o por texto. */
 export const ListPendingLoansQuerySchema = z.object({
   page: z.coerce.number().int('page debe ser un entero').min(1, 'page debe ser mayor o igual a 1').default(1),

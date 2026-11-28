@@ -32,3 +32,17 @@ export const ListStockQuerySchema = z.object({
     .transform((v) => (v === 'true' ? 'CON_ALERTA' : v)),
   groupBy: z.enum(['product', 'warehouse'], { error: 'groupBy es product o warehouse' }).default('product'),
 });
+
+const dayFilter = (name) => z.iso.date({ error: `${name} es una fecha AAAA-MM-DD` }).optional();
+
+/** Kardex de un producto (HU-409, user_flow.md §10): en un almacén o en todos, con rango de fechas inclusive. */
+export const KardexQuerySchema = z
+  .object({
+    productId: z.coerce.number({ error: 'productId es obligatorio' }).int('productId debe ser un entero').positive('productId debe ser positivo'),
+    warehouseId: optionalId('warehouseId'),
+    from: dayFilter('from'),
+    to: dayFilter('to'),
+    page: z.coerce.number().int('page debe ser un entero').min(1, 'page debe ser mayor o igual a 1').default(1),
+    limit: z.coerce.number().int('limit debe ser un entero').min(1, 'limit mínimo 1').max(100, 'limit máximo 100').default(10),
+  })
+  .refine((q) => !q.from || !q.to || q.from <= q.to, { error: 'La fecha inicial no puede ser posterior a la final', path: ['from'] });

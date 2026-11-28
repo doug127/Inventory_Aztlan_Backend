@@ -13,6 +13,9 @@ export const createCorrectionController = async (req, res) => {
   return sendOk(res, movement, { status: duplicated ? 200 : 201, meta: { duplicated, warnings } });
 };
 
+/** Historial de movimientos (HU-408). Todos los roles. */
+export const listMovementsController = async (req, res) => sendPaginated(res, await movementService.listMovements(req.validated.query));
+
 /** Préstamos pendientes de devolver (HU-405). Todos los roles. */
 export const listPendingLoansController = async (req, res) => sendPaginated(res, await movementService.listPendingLoans(req.validated.query));
 

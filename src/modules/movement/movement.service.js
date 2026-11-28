@@ -33,7 +33,7 @@ import { assertAssetAvailable } from '#src/modules/asset/asset.service.js';
 import * as stockRepository from '#src/modules/stock/stock.repository.js';
 import * as movementRepository from './movement.repository.js';
 import { QUANTITY_DECIMALS, consolidateLines, requiredByProduct, resolveMovementDate, sortedIds } from './movement.rules.js';
-import { toMovementDocumentDto, toMovementDto, toPendingLoanDto } from './movement.dto.js';
+import { toMovementDocumentDto, toMovementDto, toMovementSummaryDto, toPendingLoanDto } from './movement.dto.js';
 
 const fieldIssue = (path, message) => ({ location: 'body', path, message });
 const fixed = (value) => new Decimal(value).toFixed(QUANTITY_DECIMALS);
@@ -52,6 +52,21 @@ export const getMovement = async (id, { transaction } = {}) => {
       : null,
   ]);
   return toMovementDto(movement, { corrections: headers, corrected, correctionOf });
+};
+
+/** Historial de movimientos (HU-408), del más reciente al más antiguo. Todos los roles lo consultan. */
+export const listMovements = async (query) => {
+  const { page, limit, search, ...rest } = query;
+  const { items, total } = await movementRepository.listMovements(query);
+  return {
+    items: items.map(toMovementSummaryDto),
+    total,
+    page,
+    limit,
+    search: search ?? null,
+    filters: Object.fromEntries(Object.entries(rest).filter(([, v]) => v !== undefined)),
+    sort: { field: 'movementDate', order: 'desc' },
+  };
 };
 
 /** P6. La clave es de quien la usó primero: otro usuario con la misma clave recibe DUPLICATE_REQUEST. */
