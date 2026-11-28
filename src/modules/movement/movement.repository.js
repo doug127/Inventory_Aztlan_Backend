@@ -112,3 +112,90 @@ export const findDocument = async (movementId, documentId, { transaction, lock =
 export const attachDocumentFile = async (documentId, file, { transaction }) => {
   await MovementDocument.update(file, { where: { id: documentId }, transaction });
 };
+
+// --- Préstamos y devoluciones (HU-405) ---------------------------------------------------------
+
+/**
+ * Lo pendiente de devolver por (activo, producto), business_rules.md §2.2 regla 3:
+ * Σ OUT PRESTAMO − Σ IN DEVOLUCION. Solo pares con saldo > 0.
+ */
+const PENDING_BY_PAIR_SQL = `
+  SELECT l.asset_id, l.product_id,
+         sum(CASE WHEN h.movement_type = 'OUT' THEN l.quantity ELSE 0 END) AS lent,
+         sum(CASE WHEN h.movement_type = 'IN' THEN l.quantity ELSE 0 END) AS returned,
+         sum(CASE WHEN h.movement_type = 'OUT' THEN l.quantity ELSE -l.quantity END) AS pending
+  FROM movement_lines l JOIN movement_headers h ON h.id = l.movement_header_id
+  WHERE l.asset_id IS NOT NULL
+    AND ((h.movement_type = 'OUT' AND h.reason = 'PRESTAMO') OR (h.movement_type = 'IN' AND h.reason = 'DEVOLUCION'))
+  GROUP BY l.asset_id, l.product_id
+  HAVING sum(CASE WHEN h.movement_type = 'OUT' THEN l.quantity ELSE -l.quantity END) > 0`;
+
+/**
+ * Serializa las devoluciones de un mismo activo: dos devoluciones simultáneas no pueden ver el mismo
+ * pendiente y devolverlo dos veces. Bloqueo por activo, en orden ascendente (sin deadlocks), que dura
+ * hasta el fin de la transacción.
+ */
+export const lockLoansOfAssets = async (assetIds, { transaction }) => {
+  for (const assetId of assetIds) {
+    await sequelize.query("SELECT pg_advisory_xact_lock(hashtext('loans.asset'), :assetId)", { replacements: { assetId }, transaction });
+  }
+};
+
+/** Pendiente de esos activos: Map('assetId|productId' → texto NUMERIC) y el código de cada activo. */
+export const findPendingLoansOfAssets = async (assetIds, { transaction } = {}) => {
+  if (!assetIds.length) return { pending: new Map(), assetCodes: new Map() };
+  const [rows, assets] = await Promise.all([
+    sequelize.query(`SELECT asset_id AS "assetId", product_id AS "productId", pending::text AS pending FROM (${PENDING_BY_PAIR_SQL}) p WHERE asset_id IN (:assetIds)`, {
+      replacements: { assetIds },
+      type: QueryTypes.SELECT,
+      transaction,
+    }),
+    sequelize.query('SELECT id, code FROM assets WHERE id IN (:assetIds)', { replacements: { assetIds }, type: QueryTypes.SELECT, transaction }),
+  ]);
+  return {
+    pending: new Map(rows.map((r) => [`${r.assetId}|${r.productId}`, r.pending])),
+    assetCodes: new Map(assets.map((a) => [a.id, a.code])),
+  };
+};
+
+/**
+ * Préstamos pendientes, uno por (activo, producto), con el último préstamo de ese par: su documento,
+ * fecha, almacén y quién lo recibió (la devolución vuelve por defecto a ese almacén).
+ * Filtros: assetId, movementId (solo los pares de ese préstamo) y search (código o nombre del activo,
+ * del producto o de quien lo recibió).
+ */
+export const listPendingLoans = async ({ page, limit, assetId, movementId, search }) => {
+  const where = [];
+  if (assetId) where.push('p.asset_id = :assetId');
+  if (movementId) where.push('EXISTS (SELECT 1 FROM movement_lines ml WHERE ml.movement_header_id = :movementId AND ml.asset_id = p.asset_id AND ml.product_id = p.product_id)');
+  if (search) where.push("(a.code ILIKE :pattern OR a.name ILIKE :pattern OR pr.code ILIKE :pattern OR pr.name ILIKE :pattern OR last.received_by ILIKE :pattern)");
+  const from = `
+    FROM (${PENDING_BY_PAIR_SQL}) p
+    JOIN assets a ON a.id = p.asset_id
+    JOIN products pr ON pr.id = p.product_id
+    JOIN units u ON u.id = pr.unit_id
+    JOIN LATERAL (
+      SELECT h.id, h.document_number, h.movement_date, h.received_by, w.id AS warehouse_id, w.code AS warehouse_code, w.name AS warehouse_name
+      FROM movement_lines l JOIN movement_headers h ON h.id = l.movement_header_id JOIN warehouses w ON w.id = h.warehouse_from_id
+      WHERE l.asset_id = p.asset_id AND l.product_id = p.product_id AND h.movement_type = 'OUT' AND h.reason = 'PRESTAMO'
+      ORDER BY h.movement_date DESC, h.id DESC
+      LIMIT 1
+    ) last ON true
+    ${where.length ? `WHERE ${where.join(' AND ')}` : ''}`;
+  const replacements = { assetId, movementId, pattern: search ? `%${search.replace(/[\%_]/g, (ch) => `\${ch}`)}%` : null, limit, offset: (page - 1) * limit };
+  const [rows, [{ total }]] = await Promise.all([
+    sequelize.query(
+      `SELECT a.id AS "assetId", a.code AS "assetCode", a.name AS "assetName",
+              pr.id AS "productId", pr.code AS "productCode", pr.name AS "productName", u.code AS "unitCode",
+              p.lent::text AS lent, p.returned::text AS returned, p.pending::text AS pending,
+              last.id AS "loanId", last.document_number AS "loanDocumentNumber", last.movement_date AS "loanDate", last.received_by AS "receivedBy",
+              last.warehouse_id AS "warehouseId", last.warehouse_code AS "warehouseCode", last.warehouse_name AS "warehouseName"
+       ${from}
+       ORDER BY last.movement_date ASC, a.code COLLATE natural_sort, pr.code
+       LIMIT :limit OFFSET :offset`,
+      { replacements, type: QueryTypes.SELECT }
+    ),
+    sequelize.query(`SELECT count(*)::int AS total ${from}`, { replacements, type: QueryTypes.SELECT }),
+  ]);
+  return { items: rows, total };
+};

@@ -143,3 +143,38 @@ export const toMovementDto = (movement) => {
     totals: [...totals.values()].map((t) => ({ product: t.product, quantity: fromThousandths(t.thousandths), lines: t.lines })),
   });
 };
+
+/**
+ * Préstamo pendiente de devolver (HU-405): un activo y un producto con lo prestado, lo devuelto y lo
+ * pendiente, y el último préstamo de ese par (la devolución vuelve por defecto a su almacén).
+ */
+export const PendingLoanDto = z.object({
+  asset: z.object({ id: z.number().int(), code: z.string(), name: z.string() }),
+  product: z.object({ id: z.number().int(), code: z.string(), name: z.string(), unitCode: z.string() }),
+  lent: Quantity,
+  returned: Quantity,
+  pending: Quantity,
+  lastLoan: z.object({
+    id: z.number().int(),
+    documentNumber: z.string(),
+    movementDate: z.date(),
+    receivedBy: z.string().nullable(),
+    warehouse: WarehouseRef,
+  }),
+});
+
+export const toPendingLoanDto = (row) =>
+  PendingLoanDto.parse({
+    asset: { id: row.assetId, code: row.assetCode, name: row.assetName },
+    product: { id: row.productId, code: row.productCode, name: row.productName, unitCode: row.unitCode },
+    lent: new Decimal(row.lent).toFixed(3),
+    returned: new Decimal(row.returned).toFixed(3),
+    pending: new Decimal(row.pending).toFixed(3),
+    lastLoan: {
+      id: row.loanId,
+      documentNumber: row.loanDocumentNumber,
+      movementDate: new Date(row.loanDate),
+      receivedBy: row.receivedBy ?? null,
+      warehouse: { id: row.warehouseId, code: row.warehouseCode, name: row.warehouseName },
+    },
+  });

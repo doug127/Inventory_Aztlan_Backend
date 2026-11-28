@@ -48,6 +48,8 @@ export const CONSTRAINT_MAP = Object.freeze({
   uq_movement_headers_idempotency_key: { code: 'DUPLICATE_REQUEST' },
   chk_movement_headers_work_order_format: { code: 'VALIDATION_ERROR', message: 'La orden de trabajo es OT- seguido de letras, números o guiones' },
   chk_movement_headers_work_order_type: { code: 'VALIDATION_ERROR', message: 'Solo las órdenes de retiro llevan orden de trabajo' },
+  chk_movement_headers_adjust_reference: { code: 'VALIDATION_ERROR', message: 'Un ajuste exige el acta de conteo físico como referencia (CF-AAAA-NNN)' },
+  chk_movement_headers_adjust_note: { code: 'VALIDATION_ERROR', message: 'Un ajuste exige una observación con la causa' },
   uq_movement_headers_withdrawal_reference: { code: 'DUPLICATE_CODE', message: 'La referencia de la orden ya existe' },
   chk_withdrawal_reference_sequences_max: { code: 'VALIDATION_ERROR', message: 'El almacén llegó al máximo de 999999 órdenes de retiro en el año' },
   uq_movement_lines_header_product_asset: { code: 'VALIDATION_ERROR', message: 'Hay líneas repetidas con el mismo producto y activo' },

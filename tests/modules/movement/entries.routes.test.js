@@ -153,10 +153,10 @@ describe('Entrada por compra (business_rules.md §2.2)', () => {
 });
 
 describe('Validaciones de la entrada', () => {
-  it('motivo DEVOLUCION (llega con los préstamos) o de salida → INVALID_MOVEMENT_REASON; sin líneas → EMPTY_MOVEMENT', async () => {
+  it('motivo de salida → INVALID_MOVEMENT_REASON; DEVOLUCION sin activo → ASSET_REQUIRED (HU-405); sin líneas → EMPTY_MOVEMENT', async () => {
     const line = [{ productId: ids.oil, quantity: 1 }];
     const devolution = await enter(entry(line, { reason: 'DEVOLUCION' }));
-    expect(devolution.body.error.code).toBe('INVALID_MOVEMENT_REASON');
+    expect(devolution.body.error.code).toBe('ASSET_REQUIRED');
     expect((await enter(entry(line, { reason: 'CONSUMO' }))).body.error.code).toBe('INVALID_MOVEMENT_REASON');
     expect((await enter(entry([]))).body.error.code).toBe('EMPTY_MOVEMENT');
   });

@@ -45,8 +45,17 @@ export const OUT_REASONS_REQUIRING_ASSET = ['CONSUMO', 'PRESTAMO'];
 /** Motivos de OUT que exigen observación: DESECHO (§2.3 regla 5) y OTRO (user_flow.md §5, paso 1). */
 export const OUT_REASONS_REQUIRING_NOTE = ['DESECHO', 'OTRO'];
 
-/** Motivos de la entrada que se registran hoy: COMPRA y OTRO. DEVOLUCION llega con los préstamos (HU-405). */
-export const ENTRY_REASONS = ['COMPRA', 'OTRO'];
+/** Motivos de la entrada: COMPRA, DEVOLUCION (de un préstamo, HU-405) y OTRO. */
+export const ENTRY_REASONS = ['COMPRA', 'DEVOLUCION', 'OTRO'];
+
+/**
+ * Sentido de un ajuste (HU-404, §2.5 regla 2): SOBRANTE suma en warehouse_to_id (el conteo encontró
+ * más de lo registrado); FALTANTE resta en warehouse_from_id (encontró menos).
+ */
+export const ADJUSTMENT_KINDS = { SOBRANTE: 'SOBRANTE', FALTANTE: 'FALTANTE' };
+
+/** Acta de conteo físico (naming_conventions.md §8.2): CF-2026-004. */
+export const PHYSICAL_COUNT_REFERENCE_PATTERN = /^CF-\d{4}-\d{3,6}$/;
 
 /** Días de atraso que puede registrar un ALMACENISTA (§4 regla 2). */
 export const BACKDATE_DAYS_ALMACENISTA = 3;

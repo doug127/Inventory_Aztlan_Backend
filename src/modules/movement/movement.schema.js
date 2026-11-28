@@ -1,5 +1,6 @@
 import { z } from 'zod';
 import {
+  ADJUSTMENT_KINDS,
   MAX_RECEIPT_DOCUMENTS,
   MOVEMENT_REASONS,
   RECEIPT_DOCUMENT_PREFIXES,
@@ -191,6 +192,55 @@ export const CreateTransferSchema = z
     lines: z.array(LineSchema, { error: 'lines debe ser una lista' }).max(100, 'Un traslado admite hasta 100 líneas'),
   })
   .strict();
+
+/**
+ * Acta de conteo físico (naming_conventions.md §8.2): CF-AAAA-NNN. Se acepta con o sin el prefijo, en
+ * minúsculas y con el correlativo corto: "2026-4", "cf-2026-004" y "CF-2026-004" quedan CF-2026-004.
+ */
+const physicalCountReferenceField = z
+  .string({ error: 'Indique el acta de conteo físico (ej. CF-2026-004)' })
+  .trim()
+  .toUpperCase()
+  .transform((value) => value.replace(/\s+/g, '').replace(/^CF-?/, ''))
+  .transform((value, ctx) => {
+    const match = /^(\d{4})-(\d{1,6})$/.exec(value);
+    if (!match) {
+      ctx.addIssue({ code: 'custom', message: 'El acta de conteo es CF-AAAA-NNN (ej. CF-2026-004)' });
+      return z.NEVER;
+    }
+    return `CF-${match[1]}-${match[2].padStart(3, '0')}`;
+  });
+
+/**
+ * Ajuste por conteo físico (ADJUST, HU-404, business_rules.md §2.5). kind decide el almacén: SOBRANTE
+ * suma (warehouse_to_id) y FALTANTE resta (warehouse_from_id). Referencia CF- y observación obligatorias.
+ */
+export const CreateAdjustmentSchema = z
+  .object({
+    warehouseId: idField('warehouseId'),
+    kind: z.enum(Object.values(ADJUSTMENT_KINDS), { error: 'El tipo de ajuste es SOBRANTE o FALTANTE' }),
+    movementDate: movementDateField,
+    reference: physicalCountReferenceField,
+    note: z
+      .string({ error: 'Explique la causa del ajuste' })
+      .trim()
+      .transform((value) => value.replace(/\s+/g, ' '))
+      .pipe(z.string().min(1, 'Explique la causa del ajuste').max(1000, 'La observación no debe superar los 1000 caracteres')),
+    lines: z.array(LineSchema, { error: 'lines debe ser una lista' }).max(100, 'Un ajuste admite hasta 100 líneas'),
+  })
+  .strict();
+
+const optionalQueryId = (name) =>
+  z.coerce.number({ error: `${name} debe ser un número` }).int(`${name} debe ser un entero`).positive(`${name} debe ser positivo`).optional();
+
+/** Préstamos pendientes (HU-405): por activo, por préstamo (sus pares activo-producto) o por texto. */
+export const ListPendingLoansQuerySchema = z.object({
+  page: z.coerce.number().int('page debe ser un entero').min(1, 'page debe ser mayor o igual a 1').default(1),
+  limit: z.coerce.number().int('limit debe ser un entero').min(1, 'limit mínimo 1').max(100, 'limit máximo 100').default(10),
+  search: z.string().trim().max(150, 'La búsqueda es demasiado larga').optional().transform((v) => v || undefined),
+  assetId: optionalQueryId('assetId'),
+  movementId: optionalQueryId('movementId'),
+});
 
 export const MovementIdParamsSchema = z.object({
   id: z.coerce.number({ error: 'El id debe ser un número' }).int('El id debe ser un entero').positive('El id debe ser positivo'),

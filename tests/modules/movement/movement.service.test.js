@@ -8,6 +8,9 @@ vi.mock('#src/modules/movement/movement.repository.js', () => ({
   nextDocumentNumber: vi.fn(),
   nextWithdrawalReferenceNumber: vi.fn(),
   createMovement: vi.fn(),
+  lockLoansOfAssets: vi.fn(),
+  findPendingLoansOfAssets: vi.fn(),
+  listPendingLoans: vi.fn(),
   findDocument: vi.fn(),
   attachDocumentFile: vi.fn(),
 }));
@@ -234,7 +237,7 @@ describe('createEntry (HU-402)', () => {
 
   it('reglas de forma antes de abrir la transacción', async () => {
     const reject = (input) => service.createEntry(input, { actor: ALMACENISTA });
-    await expect(reject(entry([{ productId: 10, quantity: '1' }], { reason: 'DEVOLUCION' }))).rejects.toMatchObject({ code: 'INVALID_MOVEMENT_REASON' });
+    await expect(reject(entry([{ productId: 10, quantity: '1' }], { reason: 'DEVOLUCION' }))).rejects.toMatchObject({ code: 'ASSET_REQUIRED' });
     await expect(reject(entry([{ productId: 10, quantity: '1' }], { reason: 'VENTA' }))).rejects.toMatchObject({ code: 'INVALID_MOVEMENT_REASON' });
     await expect(reject(entry([]))).rejects.toMatchObject({ code: 'EMPTY_MOVEMENT' });
     await expect(reject(entry([{ productId: 10, quantity: '1' }], { reason: 'OTRO' }))).rejects.toMatchObject({ code: 'VALIDATION_ERROR' });
@@ -323,6 +326,111 @@ describe('createTransfer (HU-403)', () => {
       code: 'ASSET_NOT_ALLOWED',
       details: [expect.objectContaining({ path: 'lines.1.assetId', line: 2 })],
     });
+    expect(assertWarehouseAvailable).not.toHaveBeenCalled();
+  });
+});
+
+describe('devolución de préstamos (HU-405)', () => {
+  const devolution = (lines, overrides = {}) => ({ warehouseId: 5, reason: 'DEVOLUCION', reference: 'RET-000145', note: null, documents: [], lines, ...overrides });
+
+  beforeEach(() => {
+    repo.nextDocumentNumber.mockResolvedValue('ENT-000040');
+    assertWarehouseAvailable.mockResolvedValue({ id: 5, code: 'PRIN', isActive: true });
+    repo.findPendingLoansOfAssets.mockResolvedValue({
+      pending: new Map([['3|10', '5.000'], ['4|10', '2.000']]),
+      assetCodes: new Map([[3, 'T-01'], [4, 'T-02']]),
+    });
+  });
+
+  it('bloquea los préstamos de cada activo en orden antes de leer el pendiente, y suma con el activo en cada línea', async () => {
+    await service.createEntry(devolution([{ productId: 10, quantity: '2', assetId: 4 }, { productId: 10, quantity: '5', assetId: 3 }]), { actor: ALMACENISTA });
+    expect(repo.lockLoansOfAssets).toHaveBeenCalledWith([3, 4], { transaction: 'tx' });
+    expect(repo.lockLoansOfAssets.mock.invocationCallOrder[0]).toBeLessThan(repo.findPendingLoansOfAssets.mock.invocationCallOrder[0]);
+    expect(repo.createMovement).toHaveBeenCalledWith(
+      expect.objectContaining({
+        movementType: 'IN',
+        reason: 'DEVOLUCION',
+        reference: 'RET-000145',
+        lines: [expect.objectContaining({ productId: 10, assetId: 4, quantity: '2.000' }), expect.objectContaining({ productId: 10, assetId: 3, quantity: '5.000' })],
+      }),
+      { transaction: 'tx' }
+    );
+    expect(stock.incrementStock).toHaveBeenCalledWith(5, 10, '7.000', { transaction: 'tx' });
+  });
+
+  it('lo devuelto supera lo pendiente (sumando las líneas del mismo activo) → RETURN_EXCEEDS_LOAN sin numerar', async () => {
+    await expect(
+      service.createEntry(devolution([{ productId: 10, quantity: '1', assetId: 4 }, { productId: 10, quantity: '1.5', assetId: 4 }]), { actor: ALMACENISTA })
+    ).rejects.toMatchObject({
+      code: 'RETURN_EXCEEDS_LOAN',
+      details: [expect.objectContaining({ path: 'lines.0.quantity', assetCode: 'T-02', productCode: 'COMB-0001', pending: '2.000', requested: '2.500' })],
+    });
+    expect(repo.nextDocumentNumber).not.toHaveBeenCalled();
+    expect(stock.incrementStock).not.toHaveBeenCalled();
+  });
+
+  it('un activo sin préstamo pendiente → RETURN_EXCEEDS_LOAN; con documentos de recepción → VALIDATION_ERROR', async () => {
+    await expect(service.createEntry(devolution([{ productId: 11, quantity: '1', assetId: 3 }]), { actor: ALMACENISTA })).rejects.toMatchObject({
+      code: 'RETURN_EXCEEDS_LOAN',
+      message: expect.stringContaining('No hay préstamo pendiente'),
+    });
+    await expect(
+      service.createEntry(devolution([{ productId: 10, quantity: '1', assetId: 3 }], { documents: [{ documentType: 'FACTURA', documentNumber: '1' }] }), { actor: ALMACENISTA })
+    ).rejects.toMatchObject({ code: 'VALIDATION_ERROR', details: [expect.objectContaining({ path: 'documents' })] });
+  });
+});
+
+describe('createAdjustment (HU-404)', () => {
+  const adjustment = (lines, overrides = {}) => ({ warehouseId: 2, kind: 'FALTANTE', reference: 'CF-2026-004', note: 'Conteo de noviembre', lines, ...overrides });
+
+  beforeEach(() => {
+    repo.nextDocumentNumber.mockResolvedValue('AJU-000003');
+  });
+
+  it('FALTANTE: bloquea y resta en warehouse_from_id, con AJU-, motivo AJUSTE y la referencia CF-', async () => {
+    const result = await service.createAdjustment(adjustment([{ productId: 11, quantity: '2' }, { productId: 10, quantity: '15.5' }]), { actor: ADMIN });
+    expect(assertWarehouseAvailable).toHaveBeenCalledWith(2, { transaction: 'tx', role: 'origen' });
+    expect(stock.lockStockRows).toHaveBeenCalledWith(2, [10, 11], { transaction: 'tx' });
+    expect(stock.decrementStock.mock.calls.map((c) => [c[1], c[2]])).toEqual([
+      [10, '15.500'],
+      [11, '2.000'],
+    ]);
+    expect(stock.incrementStock).not.toHaveBeenCalled();
+    expect(repo.nextDocumentNumber).toHaveBeenCalledWith('ADJUST', { transaction: 'tx' });
+    expect(repo.createMovement).toHaveBeenCalledWith(
+      expect.objectContaining({ movementType: 'ADJUST', reason: 'AJUSTE', reference: 'CF-2026-004', warehouseFromId: 2, warehouseToId: null, note: 'Conteo de noviembre' }),
+      { transaction: 'tx' }
+    );
+    expect(result.warnings).toEqual({ belowMinimum: [], aboveMaximum: [], consolidated: [] });
+  });
+
+  it('SOBRANTE: suma en warehouse_to_id sin bloquear ni validar existencia', async () => {
+    await service.createAdjustment(adjustment([{ productId: 10, quantity: '400' }], { kind: 'SOBRANTE' }), { actor: ADMIN });
+    expect(assertWarehouseAvailable).toHaveBeenCalledWith(2, { transaction: 'tx', role: 'destino' });
+    expect(stock.incrementStock).toHaveBeenCalledWith(2, 10, '400.000', { transaction: 'tx' });
+    expect(stock.lockStockRows).not.toHaveBeenCalled();
+    expect(repo.createMovement).toHaveBeenCalledWith(expect.objectContaining({ warehouseFromId: null, warehouseToId: 2 }), { transaction: 'tx' });
+  });
+
+  it('FALTANTE mayor que la existencia → INSUFFICIENT_STOCK sin numerar ni registrar', async () => {
+    await expect(service.createAdjustment(adjustment([{ productId: 11, quantity: '20.001' }]), { actor: ADMIN })).rejects.toMatchObject({
+      code: 'INSUFFICIENT_STOCK',
+      details: [expect.objectContaining({ productCode: 'LUBR-0001', available: '20.000', requested: '20.001' })],
+    });
+    expect(stock.decrementStock).not.toHaveBeenCalled();
+    expect(repo.nextDocumentNumber).not.toHaveBeenCalled();
+  });
+
+  it('ALMACENISTA → FORBIDDEN_ROLE (el asistente llama al service sin la ruta); acta de un año futuro, sin líneas o con activo → error', async () => {
+    const reject = (input, actor = ADMIN) => service.createAdjustment(input, { actor });
+    await expect(reject(adjustment([{ productId: 10, quantity: '1' }]), ALMACENISTA)).rejects.toMatchObject({ code: 'FORBIDDEN_ROLE' });
+    const nextYear = new Date().getFullYear() + 1;
+    await expect(reject(adjustment([{ productId: 10, quantity: '1' }], { reference: `CF-${nextYear}-001` }))).rejects.toMatchObject({
+      code: 'VALIDATION_ERROR',
+      details: [expect.objectContaining({ path: 'reference' })],
+    });
+    await expect(reject(adjustment([]))).rejects.toMatchObject({ code: 'EMPTY_MOVEMENT' });
+    await expect(reject(adjustment([{ productId: 10, quantity: '1', assetId: 3 }]))).rejects.toMatchObject({ code: 'ASSET_NOT_ALLOWED' });
     expect(assertWarehouseAvailable).not.toHaveBeenCalled();
   });
 });

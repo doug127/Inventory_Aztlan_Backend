@@ -1,5 +1,5 @@
 // Movimientos de inventario (business_rules.md §1 a §4). HU-401: orden de retiro (OUT); HU-402: entrada (IN);
-// HU-403: traslado entre almacenes (TRANSFER).
+// HU-403: traslado entre almacenes (TRANSFER); HU-404: ajuste por conteo físico (ADJUST).
 // Principios que se cumplen aquí:
 //  - P3 Todo o nada: número de documento, cabecera, líneas y stock en una sola transacción.
 //  - P4 Bloqueo de filas: las filas de stock se bloquean FOR UPDATE en orden ascendente de producto,
@@ -13,6 +13,7 @@ import { AppError } from '#src/shared/errors/AppError.js';
 import { mapDatabaseError } from '#src/shared/errors/mapDatabaseError.js';
 import { withTransaction } from '#src/shared/db/transaction.js';
 import {
+  ADJUSTMENT_KINDS,
   CORRECTION_REFERENCE_PREFIX,
   ENTRY_REASONS,
   MOVEMENT_REASONS,
@@ -32,7 +33,7 @@ import { assertAssetAvailable } from '#src/modules/asset/asset.service.js';
 import * as stockRepository from '#src/modules/stock/stock.repository.js';
 import * as movementRepository from './movement.repository.js';
 import { QUANTITY_DECIMALS, consolidateLines, requiredByProduct, resolveMovementDate, sortedIds } from './movement.rules.js';
-import { toMovementDocumentDto, toMovementDto } from './movement.dto.js';
+import { toMovementDocumentDto, toMovementDto, toPendingLoanDto } from './movement.dto.js';
 
 const fieldIssue = (path, message) => ({ location: 'body', path, message });
 const fixed = (value) => new Decimal(value).toFixed(QUANTITY_DECIMALS);
@@ -236,18 +237,17 @@ export const entryReference = (input) => {
 
 /**
  * Reglas de la entrada que no necesitan la base de datos (business_rules.md §2.2 y §3).
- *  - Motivos COMPRA y OTRO. La DEVOLUCION de un préstamo llega con HU-405 (valida lo pendiente por activo).
+ *  - Motivos COMPRA, DEVOLUCION y OTRO.
  *  - OTRO exige observación (naming_conventions.md §8.3).
- *  - Las líneas no llevan activo (trg_movement_lines_asset_rule lo prohíbe en COMPRA; en OTRO solo
- *    tiene sentido para las correcciones de consumo, HU-406).
+ *  - DEVOLUCION (HU-405): cada línea indica el activo que devuelve (ASSET_REQUIRED) y no lleva
+ *    documentos de recepción. Lo devuelto frente a lo pendiente se valida en la transacción.
+ *  - En COMPRA y OTRO las líneas no llevan activo (trg_movement_lines_asset_rule lo prohíbe en COMPRA;
+ *    en OTRO solo tiene sentido para las correcciones de consumo, HU-406).
  *  - Las referencias REV- son correcciones: solo ADMIN, desde el movimiento original (HU-406).
  */
 const assertEntryShape = (input) => {
   if (!ENTRY_REASONS.includes(input.reason)) {
-    const message =
-      input.reason === 'DEVOLUCION'
-        ? 'Las devoluciones de préstamos se registran desde el préstamo pendiente (próximamente)'
-        : `Una entrada admite los motivos ${ENTRY_REASONS.join(' y ')}`;
+    const message = `Una entrada admite los motivos ${ENTRY_REASONS.join(', ')}`;
     throw new AppError('INVALID_MOVEMENT_REASON', { message, details: [fieldIssue('reason', message)] });
   }
   if (!input.lines.length) throw new AppError('EMPTY_MOVEMENT', { message: 'Agregue al menos una línea a la entrada' });
@@ -258,6 +258,20 @@ const assertEntryShape = (input) => {
   if (input.reference?.startsWith(CORRECTION_REFERENCE_PREFIX)) {
     const message = 'Las correcciones (REV-) las registra un administrador desde el movimiento original';
     throw new AppError('VALIDATION_ERROR', { message, details: [fieldIssue('reference', message)] });
+  }
+  if (input.reason === MOVEMENT_REASONS.DEVOLUCION) {
+    if (input.documents?.length) {
+      const message = 'Una devolución no lleva documentos de recepción: indique el préstamo en la referencia';
+      throw new AppError('VALIDATION_ERROR', { message, details: [fieldIssue('documents', message)] });
+    }
+    const missing = input.lines.map((line, i) => ({ line: i + 1, assetId: line.assetId })).filter((l) => !l.assetId);
+    if (missing.length) {
+      throw new AppError('ASSET_REQUIRED', {
+        message: `En una devolución cada línea indica el activo que devuelve (línea ${missing.map((m) => m.line).join(', ')})`,
+        details: missing.map((m) => ({ location: 'body', path: `lines.${m.line - 1}.assetId`, message: 'Indique el activo que devuelve', line: m.line })),
+      });
+    }
+    return;
   }
   assertReceiptDocuments(input.documents ?? []);
   const withAsset = input.lines.map((line, i) => ({ line: i + 1, assetId: line.assetId })).filter((l) => l.assetId);
@@ -279,6 +293,56 @@ const findAboveMaximum = async (productIds, { transaction }) =>
     .map((row) => ({ productId: row.productId, productCode: row.code, productName: row.name, unitCode: row.unitCode, total: fixed(row.total), maxStock: fixed(row.maxStock) }));
 
 /**
+ * Devolución de préstamos (HU-405, business_rules.md §2.2 regla 3): lo devuelto por (activo, producto)
+ * no puede superar lo pendiente = Σ OUT PRESTAMO − Σ IN DEVOLUCION. Se bloquean los préstamos de cada
+ * activo (en orden ascendente) antes de leer el pendiente, así dos devoluciones simultáneas del mismo
+ * activo esperan una a la otra y la segunda ve lo que ya devolvió la primera.
+ * lines vienen consolidadas (una por activo y producto); sources indica sus líneas originales.
+ */
+const assertReturnWithinLoans = async (lines, products, { transaction }) => {
+  const assetIds = sortedIds(lines.map((l) => l.assetId));
+  await movementRepository.lockLoansOfAssets(assetIds, { transaction });
+  const { pending, assetCodes } = await movementRepository.findPendingLoansOfAssets(assetIds, { transaction });
+  const excess = lines
+    .map((l) => ({ ...l, pending: new Decimal(pending.get(`${l.assetId}|${l.productId}`) ?? 0) }))
+    .filter((l) => l.quantity.gt(l.pending));
+  if (!excess.length) return;
+  const describe = (l) => `${products.get(l.productId).code} para ${assetCodes.get(l.assetId) ?? `el activo ${l.assetId}`}`;
+  const [first] = excess;
+  throw new AppError('RETURN_EXCEEDS_LOAN', {
+    message: first.pending.isZero()
+      ? `No hay préstamo pendiente de ${describe(first)}`
+      : `La devolución de ${describe(first)} supera lo prestado pendiente: pendiente ${fixed(first.pending)}, devuelto ${fixed(first.quantity)}`,
+    details: excess.map((l) => ({
+      location: 'body',
+      path: `lines.${l.sources[0] - 1}.quantity`,
+      line: l.sources[0],
+      assetId: l.assetId,
+      assetCode: assetCodes.get(l.assetId) ?? null,
+      productId: l.productId,
+      productCode: products.get(l.productId).code,
+      pending: fixed(l.pending),
+      requested: fixed(l.quantity),
+    })),
+  });
+};
+
+/** Préstamos pendientes de devolver (HU-405), uno por activo y producto, paginados. */
+export const listPendingLoans = async (query) => {
+  const { page, limit, assetId, movementId, search } = query;
+  const { items, total } = await movementRepository.listPendingLoans(query);
+  return {
+    items: items.map(toPendingLoanDto),
+    total,
+    page,
+    limit,
+    search: search ?? null,
+    filters: Object.fromEntries(Object.entries({ assetId, movementId }).filter(([, v]) => v !== undefined)),
+    sort: { field: 'loanDate', order: 'asc' },
+  };
+};
+
+/**
  * Entrada (IN, HU-402): suma existencias en el almacén de destino. Mismo esquema que la orden de
  * retiro: todo en una transacción, número ENT- sin huecos, idempotencia y regla de fechas por rol.
  * El stock se suma con INSERT … ON CONFLICT en orden ascendente de producto (P4): la fila se crea si
@@ -295,7 +359,9 @@ export const createEntry = async (input, { actor, idempotencyKey } = {}) =>
 
     const created = await withTransaction(async (transaction) => {
       const warehouse = await assertWarehouseAvailable(input.warehouseId, { transaction, role: 'destino' });
-      for (const id of productIds) await assertProductAvailable(id, { transaction });
+      const products = new Map();
+      for (const id of productIds) products.set(id, await assertProductAvailable(id, { transaction }));
+      if (input.reason === MOVEMENT_REASONS.DEVOLUCION) await assertReturnWithinLoans(lines, products, { transaction });
 
       const documentNumber = await nextDocumentNumberOrFail(MOVEMENT_TYPES.IN, { transaction });
       const id = await movementRepository.createMovement(
@@ -312,7 +378,7 @@ export const createEntry = async (input, { actor, idempotencyKey } = {}) =>
           receivedBy: input.receivedBy ?? null,
           note: input.note ?? null,
           idempotencyKey: idempotencyKey ?? null,
-          lines: lines.map((l) => ({ productId: l.productId, assetId: null, quantity: fixed(l.quantity), note: l.note })),
+          lines: lines.map((l) => ({ productId: l.productId, assetId: l.assetId, quantity: fixed(l.quantity), note: l.note })),
           documents: (input.documents ?? []).map((doc) => ({
             documentType: doc.documentType,
             documentNumber: doc.documentNumber,
@@ -444,6 +510,115 @@ export const createTransfer = async (input, { actor, idempotencyKey } = {}) =>
     });
 
     return { id: createdId, warnings: { consolidated: consolidatedWarning(lines) } };
+  });
+
+// --- Ajuste por conteo físico (ADJUST, HU-404) ----------------------------------------------
+
+/**
+ * Reglas del ajuste que no necesitan la base de datos (business_rules.md §2.5 y §3).
+ *  - Solo ADMIN y SUPERADMIN (regla 1). La ruta ya lo exige; se repite aquí porque el asistente IA
+ *    llama a este service sin pasar por la ruta.
+ *  - El acta CF- no puede ser de un año posterior a la fecha del ajuste.
+ *  - Al menos una línea y ninguna con activo (trg_movement_lines_asset_rule lo prohíbe en ADJUST).
+ * La referencia CF- y la observación obligatorias las valida el schema (y los CHECK de la base).
+ */
+const assertAdjustmentShape = (input, actor, movementDate) => {
+  if (actor.hierarchy > ROLE_HIERARCHY.ADMIN) {
+    throw new AppError('FORBIDDEN_ROLE', { message: 'Solo un administrador registra ajustes por conteo físico' });
+  }
+  const actaYear = Number(input.reference.slice(3, 7));
+  if (actaYear > movementDate.getFullYear()) {
+    const message = `El acta ${input.reference} es de un año posterior a la fecha del ajuste`;
+    throw new AppError('VALIDATION_ERROR', { message, details: [fieldIssue('reference', message)] });
+  }
+  if (!input.lines.length) throw new AppError('EMPTY_MOVEMENT', { message: 'Agregue al menos una línea al ajuste' });
+  const withAsset = input.lines.map((line, i) => ({ line: i + 1, assetId: line.assetId })).filter((l) => l.assetId);
+  if (withAsset.length) {
+    throw new AppError('ASSET_NOT_ALLOWED', {
+      message: `Las líneas de un ajuste no llevan activo (línea ${withAsset.map((l) => l.line).join(', ')})`,
+      details: withAsset.map((l) => ({ location: 'body', path: `lines.${l.line - 1}.assetId`, message: 'Quite el activo', line: l.line })),
+    });
+  }
+};
+
+/**
+ * Ajuste por conteo físico (ADJUST, HU-404, business_rules.md §2.5). Un solo almacén:
+ *  - SOBRANTE: warehouse_to_id, suma (crea la fila de stock si el producto no estaba).
+ *  - FALTANTE: warehouse_from_id, resta con la fila bloqueada y sin dejar el stock negativo (P5).
+ * Mismo esquema que los demás movimientos: una transacción, número AJU- sin huecos, idempotencia y
+ * regla de fechas. Devuelve { movement, duplicated, warnings: { belowMinimum, aboveMaximum, consolidated } }.
+ */
+export const createAdjustment = async (input, { actor, idempotencyKey } = {}) =>
+  runIdempotent({ idempotencyKey, actor, emptyWarnings: { belowMinimum: [], aboveMaximum: [], consolidated: [] } }, async () => {
+    const movementDate = resolveMovementDate(input, actor);
+    assertAdjustmentShape(input, actor, movementDate);
+    const lines = consolidateLines(input.lines);
+    const adjusted = requiredByProduct(lines);
+    const productIds = sortedIds([...adjusted.keys()]);
+    const surplus = input.kind === ADJUSTMENT_KINDS.SOBRANTE;
+
+    const created = await withTransaction(async (transaction) => {
+      const warehouse = await assertWarehouseAvailable(input.warehouseId, { transaction, role: surplus ? 'destino' : 'origen' });
+      const products = new Map();
+      for (const id of productIds) products.set(id, await assertProductAvailable(id, { transaction }));
+
+      if (surplus) {
+        for (const productId of productIds) {
+          await stockRepository.incrementStock(warehouse.id, productId, fixed(adjusted.get(productId)), { transaction });
+        }
+      } else {
+        const stock = await stockRepository.lockStockRows(warehouse.id, productIds, { transaction });
+        const shortages = productIds
+          .map((id) => ({ id, available: new Decimal(stock.get(id) ?? 0), requested: adjusted.get(id) }))
+          .filter((s) => s.available.lt(s.requested));
+        if (shortages.length) {
+          const [first] = shortages;
+          throw new AppError('INSUFFICIENT_STOCK', {
+            message: `El faltante de ${products.get(first.id).code} supera la existencia en ${warehouse.code}: registrada ${fixed(first.available)}, faltante ${fixed(first.requested)}`,
+            details: shortages.map((s) => ({
+              productId: s.id,
+              productCode: products.get(s.id).code,
+              warehouseCode: warehouse.code,
+              available: fixed(s.available),
+              requested: fixed(s.requested),
+            })),
+          });
+        }
+        for (const productId of productIds) {
+          await stockRepository.decrementStock(warehouse.id, productId, fixed(adjusted.get(productId)), { transaction });
+        }
+      }
+
+      const documentNumber = await nextDocumentNumberOrFail(MOVEMENT_TYPES.ADJUST, { transaction });
+      const id = await movementRepository.createMovement(
+        {
+          documentNumber,
+          movementType: MOVEMENT_TYPES.ADJUST,
+          reason: MOVEMENT_REASONS.AJUSTE,
+          reference: input.reference,
+          workOrder: null,
+          movementDate,
+          createdByUserId: actor.id,
+          warehouseFromId: surplus ? null : warehouse.id,
+          warehouseToId: surplus ? warehouse.id : null,
+          receivedBy: null,
+          note: input.note,
+          idempotencyKey: idempotencyKey ?? null,
+          lines: lines.map((l) => ({ productId: l.productId, assetId: null, quantity: fixed(l.quantity), note: l.note })),
+        },
+        { transaction }
+      );
+      return {
+        id,
+        belowMinimum: surplus ? [] : await findBelowMinimum(productIds, { transaction }),
+        aboveMaximum: surplus ? await findAboveMaximum(productIds, { transaction }) : [],
+      };
+    });
+
+    return {
+      id: created.id,
+      warnings: { belowMinimum: created.belowMinimum, aboveMaximum: created.aboveMaximum, consolidated: consolidatedWarning(lines) },
+    };
   });
 
 // --- Archivo de un documento de recepción --------------------------------------------------

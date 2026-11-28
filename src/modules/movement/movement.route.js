@@ -6,9 +6,11 @@ import { rawBody } from '#src/shared/middlewares/rawBody.middleware.js';
 import { ROLE_CODES } from '#src/shared/constants/roles.js';
 import { RECEIPT_FILE_MAX_BYTES, RECEIPT_FILE_MIME_TYPES } from '#src/shared/constants/movements.js';
 import {
+  CreateAdjustmentSchema,
   CreateEntrySchema,
   CreateTransferSchema,
   CreateWithdrawalSchema,
+  ListPendingLoansQuerySchema,
   DocumentFileHeadersSchema,
   DocumentFileParamsSchema,
   DocumentFileQuerySchema,
@@ -17,16 +19,18 @@ import {
 } from './movement.schema.js';
 import {
   attachDocumentFileController,
+  createAdjustmentController,
   createEntryController,
   createTransferController,
   createWithdrawalController,
   getDocumentFileController,
   getMovementController,
+  listPendingLoansController,
 } from './movement.controller.js';
 
 const router = Router();
 
-// Consultar: todos los roles. Registrar órdenes de retiro, entradas y traslados: ALMACENISTA o superior (business_rules.md
+// Consultar (también los préstamos pendientes): todos los roles. Registrar órdenes de retiro, entradas, devoluciones y traslados: ALMACENISTA o superior (business_rules.md
 // §8.2). Los movimientos son inmutables: no hay PUT, PATCH ni DELETE (P1). La única excepción es adjuntar,
 // una vez, el archivo escaneado de un documento de recepción.
 router.use(auth);
@@ -49,6 +53,15 @@ router.post(
   validate({ headers: IdempotencyHeadersSchema, body: CreateTransferSchema }),
   createTransferController
 );
+// Ajustes por conteo físico: solo ADMIN y SUPERADMIN (business_rules.md §2.5 regla 1).
+router.post(
+  '/adjustments',
+  authorizeRole(ROLE_CODES.ADMIN),
+  validate({ headers: IdempotencyHeadersSchema, body: CreateAdjustmentSchema }),
+  createAdjustmentController
+);
+// Préstamos pendientes de devolver (HU-405): todos los roles. Va antes de /:id.
+router.get('/loans/pending', validate({ query: ListPendingLoansQuerySchema }), listPendingLoansController);
 router.get('/:id', validate({ params: MovementIdParamsSchema }), getMovementController);
 
 // Archivo de un documento de recepción (factura, vale, recibo). El cuerpo es el archivo crudo.
