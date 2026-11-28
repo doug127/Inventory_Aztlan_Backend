@@ -18,7 +18,8 @@ export const sendList = (res, items) => {
   return sendOk(res, items, { meta: { count: items.length } });
 };
 
-export const sendPaginated = (res, { items, total, page, limit, filters = {}, search = null, sort }) => {
+/** summary (opcional): totales del listado que no dependen de la página, por ejemplo conteos por estado. */
+export const sendPaginated = (res, { items, total, page, limit, filters = {}, search = null, sort, summary }) => {
   const totalPages = total === 0 ? 0 : Math.ceil(total / limit);
   addLogContext(res, { items: `${items.length}/${total}`, page });
   return sendOk(res, items, {
@@ -34,6 +35,7 @@ export const sendPaginated = (res, { items, total, page, limit, filters = {}, se
       filters,
       search: search ?? null,
       sort,
+      ...(summary !== undefined && { summary }),
     },
   });
 };

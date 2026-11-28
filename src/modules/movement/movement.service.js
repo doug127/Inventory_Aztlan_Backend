@@ -38,10 +38,20 @@ import { toMovementDocumentDto, toMovementDto, toPendingLoanDto } from './moveme
 const fieldIssue = (path, message) => ({ location: 'body', path, message });
 const fixed = (value) => new Decimal(value).toFixed(QUANTITY_DECIMALS);
 
+/**
+ * Movimiento con sus correcciones (HU-406): qué movimientos lo corrigen (REV-{documento}), cuánto de
+ * cada línea ya se corrigió y, si es una corrección, a cuál corrige.
+ */
 export const getMovement = async (id, { transaction } = {}) => {
   const movement = await movementRepository.findMovementById(id, { transaction });
   if (!movement) throw new AppError('NOT_FOUND', { message: `Movimiento ${id} no encontrado` });
-  return toMovementDto(movement);
+  const [{ headers, corrected }, correctionOf] = await Promise.all([
+    movementRepository.findCorrectionsOf(movement.documentNumber, { transaction }),
+    movement.reference?.startsWith(CORRECTION_REFERENCE_PREFIX)
+      ? movementRepository.findByDocumentNumber(movement.reference.slice(CORRECTION_REFERENCE_PREFIX.length), { transaction })
+      : null,
+  ]);
+  return toMovementDto(movement, { corrections: headers, corrected, correctionOf });
 };
 
 /** P6. La clave es de quien la usó primero: otro usuario con la misma clave recibe DUPLICATE_REQUEST. */
@@ -140,7 +150,7 @@ const consolidatedWarning = (lines) =>
  * Orden de retiro (OUT, HU-401). input viene validado por el schema; actor es req.user.
  * Devuelve { movement, duplicated, warnings: { belowMinimum, consolidated } }.
  */
-export const createWithdrawalOrder = async (input, { actor, idempotencyKey } = {}) =>
+export const createWithdrawalOrder = async (input, { actor, idempotencyKey, correction } = {}) =>
   runIdempotent({ idempotencyKey, actor, emptyWarnings: { belowMinimum: [], consolidated: [] } }, async () => {
     assertWithdrawalShape(input);
     const movementDate = resolveMovementDate(input, actor);
@@ -150,6 +160,8 @@ export const createWithdrawalOrder = async (input, { actor, idempotencyKey } = {
     const assetIds = sortedIds(lines.map((l) => l.assetId).filter(Boolean));
 
     const created = await withTransaction(async (transaction) => {
+      // Corrección (HU-406): bloqueo y saldo por corregir del original, antes de tocar el stock.
+      if (correction) await correction.inTransaction(transaction);
       const warehouse = await assertWarehouseAvailable(input.warehouseId, { transaction, role: 'origen' });
       // FOR SHARE: nadie desactiva el producto ni el activo mientras se registra la orden.
       const products = new Map();
@@ -176,14 +188,17 @@ export const createWithdrawalOrder = async (input, { actor, idempotencyKey } = {
       }
 
       const documentNumber = await nextDocumentNumberOrFail(MOVEMENT_TYPES.OUT, { transaction });
-      const referenceNumber = await movementRepository.nextWithdrawalReferenceNumber(warehouse.id, movementDate.getFullYear(), { transaction });
+      // Una corrección lleva REV-{documento} y no consume el correlativo de referencias del almacén.
+      const reference = correction
+        ? correction.reference
+        : withdrawalReference(warehouse, movementDate, await movementRepository.nextWithdrawalReferenceNumber(warehouse.id, movementDate.getFullYear(), { transaction }));
 
       const id = await movementRepository.createMovement(
         {
           documentNumber,
           movementType: MOVEMENT_TYPES.OUT,
           reason: input.reason,
-          reference: withdrawalReference(warehouse, movementDate, referenceNumber),
+          reference,
           workOrder: input.workOrder ?? null,
           movementDate,
           createdByUserId: actor.id,
@@ -245,7 +260,7 @@ export const entryReference = (input) => {
  *    en OTRO solo tiene sentido para las correcciones de consumo, HU-406).
  *  - Las referencias REV- son correcciones: solo ADMIN, desde el movimiento original (HU-406).
  */
-const assertEntryShape = (input) => {
+const assertEntryShape = (input, { correction } = {}) => {
   if (!ENTRY_REASONS.includes(input.reason)) {
     const message = `Una entrada admite los motivos ${ENTRY_REASONS.join(', ')}`;
     throw new AppError('INVALID_MOVEMENT_REASON', { message, details: [fieldIssue('reason', message)] });
@@ -255,7 +270,7 @@ const assertEntryShape = (input) => {
     const message = 'Explique el motivo de la entrada';
     throw new AppError('VALIDATION_ERROR', { message, details: [fieldIssue('note', message)] });
   }
-  if (input.reference?.startsWith(CORRECTION_REFERENCE_PREFIX)) {
+  if (!correction && input.reference?.startsWith(CORRECTION_REFERENCE_PREFIX)) {
     const message = 'Las correcciones (REV-) las registra un administrador desde el movimiento original';
     throw new AppError('VALIDATION_ERROR', { message, details: [fieldIssue('reference', message)] });
   }
@@ -274,7 +289,8 @@ const assertEntryShape = (input) => {
     return;
   }
   assertReceiptDocuments(input.documents ?? []);
-  const withAsset = input.lines.map((line, i) => ({ line: i + 1, assetId: line.assetId })).filter((l) => l.assetId);
+  // Una corrección de consumo (IN OTRO) devuelve con el mismo activo: así se calcula el consumo neto (§5).
+  const withAsset = correction ? [] : input.lines.map((line, i) => ({ line: i + 1, assetId: line.assetId })).filter((l) => l.assetId);
   if (withAsset.length) {
     throw new AppError('ASSET_NOT_ALLOWED', {
       message: `Las líneas de una entrada no llevan activo (línea ${withAsset.map((l) => l.line).join(', ')})`,
@@ -349,15 +365,17 @@ export const listPendingLoans = async (query) => {
  * el producto nunca tuvo existencia en ese almacén (§2.2 regla 4).
  * Devuelve { movement, duplicated, warnings: { aboveMaximum, consolidated } }.
  */
-export const createEntry = async (input, { actor, idempotencyKey } = {}) =>
+export const createEntry = async (input, { actor, idempotencyKey, correction } = {}) =>
   runIdempotent({ idempotencyKey, actor, emptyWarnings: { aboveMaximum: [], consolidated: [] } }, async () => {
-    assertEntryShape(input);
+    assertEntryShape(input, { correction });
     const movementDate = resolveMovementDate(input, actor);
     const lines = consolidateLines(input.lines);
     const received = requiredByProduct(lines);
     const productIds = sortedIds([...received.keys()]);
 
     const created = await withTransaction(async (transaction) => {
+      // Corrección (HU-406): bloqueo y saldo por corregir del original, antes de tocar el stock.
+      if (correction) await correction.inTransaction(transaction);
       const warehouse = await assertWarehouseAvailable(input.warehouseId, { transaction, role: 'destino' });
       const products = new Map();
       for (const id of productIds) products.set(id, await assertProductAvailable(id, { transaction }));
@@ -369,7 +387,7 @@ export const createEntry = async (input, { actor, idempotencyKey } = {}) =>
           documentNumber,
           movementType: MOVEMENT_TYPES.IN,
           reason: input.reason,
-          reference: entryReference(input),
+          reference: correction ? correction.reference : entryReference(input),
           workOrder: null,
           movementDate,
           createdByUserId: actor.id,
@@ -432,7 +450,7 @@ const assertTransferShape = (input) => {
  * falta stock). Así dos traslados cruzados A→B y B→A esperan uno al otro en vez de bloquearse.
  * Devuelve { movement, duplicated, warnings: { consolidated } }.
  */
-export const createTransfer = async (input, { actor, idempotencyKey } = {}) =>
+export const createTransfer = async (input, { actor, idempotencyKey, correction } = {}) =>
   runIdempotent({ idempotencyKey, actor, emptyWarnings: { consolidated: [] } }, async () => {
     assertTransferShape(input);
     const movementDate = resolveMovementDate(input, actor);
@@ -441,6 +459,8 @@ export const createTransfer = async (input, { actor, idempotencyKey } = {}) =>
     const productIds = sortedIds([...moved.keys()]);
 
     const createdId = await withTransaction(async (transaction) => {
+      // Corrección (HU-406): bloqueo y saldo por corregir del original, antes de tocar el stock.
+      if (correction) await correction.inTransaction(transaction);
       // Los almacenes se bloquean FOR SHARE también en orden ascendente de id.
       const [firstId, secondId] = sortedIds([input.warehouseFromId, input.warehouseToId]);
       const roleOf = (id) => (id === input.warehouseFromId ? 'origen' : 'destino');
@@ -494,7 +514,7 @@ export const createTransfer = async (input, { actor, idempotencyKey } = {}) =>
           documentNumber,
           movementType: MOVEMENT_TYPES.TRANSFER,
           reason: MOVEMENT_REASONS.TRASLADO,
-          reference: null,
+          reference: correction?.reference ?? null,
           workOrder: null,
           movementDate,
           createdByUserId: actor.id,
@@ -522,11 +542,12 @@ export const createTransfer = async (input, { actor, idempotencyKey } = {}) =>
  *  - Al menos una línea y ninguna con activo (trg_movement_lines_asset_rule lo prohíbe en ADJUST).
  * La referencia CF- y la observación obligatorias las valida el schema (y los CHECK de la base).
  */
-const assertAdjustmentShape = (input, actor, movementDate) => {
+const assertAdjustmentShape = (input, actor, movementDate, { correction } = {}) => {
   if (actor.hierarchy > ROLE_HIERARCHY.ADMIN) {
     throw new AppError('FORBIDDEN_ROLE', { message: 'Solo un administrador registra ajustes por conteo físico' });
   }
-  const actaYear = Number(input.reference.slice(3, 7));
+  // Una corrección (REV-AJU-) no lleva acta CF-.
+  const actaYear = correction ? 0 : Number(input.reference.slice(3, 7));
   if (actaYear > movementDate.getFullYear()) {
     const message = `El acta ${input.reference} es de un año posterior a la fecha del ajuste`;
     throw new AppError('VALIDATION_ERROR', { message, details: [fieldIssue('reference', message)] });
@@ -548,16 +569,18 @@ const assertAdjustmentShape = (input, actor, movementDate) => {
  * Mismo esquema que los demás movimientos: una transacción, número AJU- sin huecos, idempotencia y
  * regla de fechas. Devuelve { movement, duplicated, warnings: { belowMinimum, aboveMaximum, consolidated } }.
  */
-export const createAdjustment = async (input, { actor, idempotencyKey } = {}) =>
+export const createAdjustment = async (input, { actor, idempotencyKey, correction } = {}) =>
   runIdempotent({ idempotencyKey, actor, emptyWarnings: { belowMinimum: [], aboveMaximum: [], consolidated: [] } }, async () => {
     const movementDate = resolveMovementDate(input, actor);
-    assertAdjustmentShape(input, actor, movementDate);
+    assertAdjustmentShape(input, actor, movementDate, { correction });
     const lines = consolidateLines(input.lines);
     const adjusted = requiredByProduct(lines);
     const productIds = sortedIds([...adjusted.keys()]);
     const surplus = input.kind === ADJUSTMENT_KINDS.SOBRANTE;
 
     const created = await withTransaction(async (transaction) => {
+      // Corrección (HU-406): bloqueo y saldo por corregir del original, antes de tocar el stock.
+      if (correction) await correction.inTransaction(transaction);
       const warehouse = await assertWarehouseAvailable(input.warehouseId, { transaction, role: surplus ? 'destino' : 'origen' });
       const products = new Map();
       for (const id of productIds) products.set(id, await assertProductAvailable(id, { transaction }));
@@ -595,7 +618,7 @@ export const createAdjustment = async (input, { actor, idempotencyKey } = {}) =>
           documentNumber,
           movementType: MOVEMENT_TYPES.ADJUST,
           reason: MOVEMENT_REASONS.AJUSTE,
-          reference: input.reference,
+          reference: correction ? correction.reference : input.reference,
           workOrder: null,
           movementDate,
           createdByUserId: actor.id,
@@ -620,6 +643,125 @@ export const createAdjustment = async (input, { actor, idempotencyKey } = {}) =>
       warnings: { belowMinimum: created.belowMinimum, aboveMaximum: created.aboveMaximum, consolidated: consolidatedWarning(lines) },
     };
   });
+
+// --- Corrección con un movimiento inverso (HU-406) -----------------------------------------
+
+const lineKey = (productId, assetId) => `${productId}|${assetId ?? ''}`;
+
+/**
+ * Corrige un movimiento con su inverso (business_rules.md §5): los movimientos no se editan. Solo
+ * ADMIN y SUPERADMIN. El inverso lleva la referencia REV-{documento} y reutiliza el registrador de su
+ * tipo, con todas sus reglas (stock, fechas, idempotencia):
+ *  - OUT → IN OTRO al mismo almacén y con el mismo activo (consumo neto, §5). Un PRESTAMO se corrige
+ *    con IN DEVOLUCION, que baja lo pendiente y no puede superarlo.
+ *  - IN  → OUT OTRO desde el mismo almacén, sin dejar stock negativo. Una DEVOLUCION se corrige con
+ *    OUT PRESTAMO al mismo activo, que vuelve a dejar pendiente lo devuelto de más.
+ *  - TRANSFER → TRANSFER de destino a origen.
+ *  - ADJUST → ADJUST en el sentido contrario (REV-AJU-…).
+ * input: { lines: [{ lineId, quantity }], note, movementDate? }. Por cada línea del original se corrige
+ * como máximo lo que queda (cantidad original − lo ya corregido); dentro de la transacción del inverso
+ * se bloquean las correcciones del original, así dos correcciones simultáneas no lo exceden.
+ * Una corrección no se corrige: se registra otra sobre el original.
+ */
+export const createCorrection = async (movementId, input, { actor, idempotencyKey } = {}) => {
+  if (actor.hierarchy > ROLE_HIERARCHY.ADMIN) {
+    throw new AppError('FORBIDDEN_ROLE', { message: 'Solo un administrador registra correcciones' });
+  }
+  const original = await movementRepository.findMovementById(movementId);
+  if (!original) throw new AppError('NOT_FOUND', { message: `Movimiento ${movementId} no encontrado` });
+  if (original.reference?.startsWith(CORRECTION_REFERENCE_PREFIX)) {
+    throw new AppError('CORRECTION_NOT_ALLOWED', {
+      message: `${original.documentNumber} ya es una corrección de ${original.reference.slice(CORRECTION_REFERENCE_PREFIX.length)}: corrija el movimiento original`,
+    });
+  }
+  if (!input.lines.length) throw new AppError('EMPTY_MOVEMENT', { message: 'Elija al menos una línea a corregir' });
+
+  const byId = new Map(original.lines.map((l) => [l.id, l]));
+  const seen = new Set();
+  const issues = [];
+  input.lines.forEach((l, i) => {
+    if (!byId.has(l.lineId)) issues.push(fieldIssue(`lines.${i}.lineId`, `La línea ${l.lineId} no es de ${original.documentNumber}`));
+    else if (seen.has(l.lineId)) issues.push(fieldIssue(`lines.${i}.lineId`, 'La línea está repetida'));
+    seen.add(l.lineId);
+  });
+  if (issues.length) throw new AppError('VALIDATION_ERROR', { message: issues[0].message, details: issues });
+
+  const date = input.movementDate ?? new Date();
+  if (date < new Date(original.movementDate)) {
+    const message = `La corrección no puede ser anterior a ${original.documentNumber}`;
+    throw new AppError('MOVEMENT_DATE_INVALID', { message, details: [fieldIssue('movementDate', message)] });
+  }
+
+  const requested = input.lines.map((l, i) => ({ index: i, line: byId.get(l.lineId), quantity: new Decimal(l.quantity) }));
+  const reference = `${CORRECTION_REFERENCE_PREFIX}${original.documentNumber}`;
+  const correction = {
+    reference,
+    inTransaction: async (transaction) => {
+      await movementRepository.lockCorrectionsOf(original.id, { transaction });
+      const { corrected } = await movementRepository.findCorrectionsOf(original.documentNumber, { transaction });
+      const excess = requested
+        .map((r) => ({ ...r, available: new Decimal(r.line.quantity).minus(corrected.get(lineKey(r.line.product.id, r.line.asset?.id)) ?? 0) }))
+        .filter((r) => r.quantity.gt(r.available));
+      if (!excess.length) return;
+      const [first] = excess;
+      throw new AppError('CORRECTION_EXCEEDS_ORIGINAL', {
+        message: `${first.line.product.code}${first.line.asset ? ` (${first.line.asset.code})` : ''}: queda por corregir ${fixed(first.available)}, se pidió ${fixed(first.quantity)}`,
+        details: excess.map((r) => ({
+          location: 'body',
+          path: `lines.${r.index}.quantity`,
+          lineId: r.line.id,
+          productCode: r.line.product.code,
+          available: fixed(r.available),
+          requested: fixed(r.quantity),
+        })),
+      });
+    },
+  };
+
+  const lines = requested.map((r) => ({ productId: r.line.product.id, assetId: r.line.asset?.id ?? null, quantity: fixed(r.quantity), note: null }));
+  const common = { movementDate: input.movementDate, note: input.note, lines };
+  const options = { actor, idempotencyKey, correction };
+  switch (original.movementType) {
+    case MOVEMENT_TYPES.OUT:
+      return createEntry(
+        {
+          ...common,
+          warehouseId: original.fromWarehouse.id,
+          reason: original.reason === MOVEMENT_REASONS.PRESTAMO ? MOVEMENT_REASONS.DEVOLUCION : MOVEMENT_REASONS.OTRO,
+          reference: null,
+          documents: [],
+          receivedBy: original.receivedBy ?? null,
+        },
+        options
+      );
+    case MOVEMENT_TYPES.IN:
+      return createWithdrawalOrder(
+        {
+          ...common,
+          warehouseId: original.toWarehouse.id,
+          reason: original.reason === MOVEMENT_REASONS.DEVOLUCION ? MOVEMENT_REASONS.PRESTAMO : MOVEMENT_REASONS.OTRO,
+          // Un préstamo exige quién lo tiene: el que devolvió de más (o, si no consta, el documento).
+          receivedBy: original.receivedBy ?? `Corrección de ${original.documentNumber}`,
+          workOrder: null,
+        },
+        options
+      );
+    case MOVEMENT_TYPES.TRANSFER:
+      return createTransfer({ ...common, warehouseFromId: original.toWarehouse.id, warehouseToId: original.fromWarehouse.id, receivedBy: null }, options);
+    case MOVEMENT_TYPES.ADJUST:
+      return createAdjustment(
+        {
+          ...common,
+          warehouseId: (original.toWarehouse ?? original.fromWarehouse).id,
+          kind: original.toWarehouse ? ADJUSTMENT_KINDS.FALTANTE : ADJUSTMENT_KINDS.SOBRANTE,
+          reference,
+        },
+        options
+      );
+    default:
+      throw new AppError('CORRECTION_NOT_ALLOWED', { message: `Tipo de movimiento desconocido: ${original.movementType}` });
+  }
+};
 
 // --- Archivo de un documento de recepción --------------------------------------------------
 

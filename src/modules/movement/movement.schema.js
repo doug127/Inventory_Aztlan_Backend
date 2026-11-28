@@ -242,6 +242,24 @@ export const ListPendingLoansQuerySchema = z.object({
   movementId: optionalQueryId('movementId'),
 });
 
+/**
+ * Corrección de un movimiento (HU-406): qué líneas del original y cuánto revertir. El tipo y el motivo
+ * del inverso los decide el service según el original. La observación (por qué se corrige) es obligatoria.
+ */
+export const CreateCorrectionSchema = z
+  .object({
+    movementDate: movementDateField,
+    note: z
+      .string({ error: 'Explique por qué se corrige' })
+      .trim()
+      .transform((value) => value.replace(/\s+/g, ' '))
+      .pipe(z.string().min(1, 'Explique por qué se corrige').max(1000, 'La observación no debe superar los 1000 caracteres')),
+    lines: z
+      .array(z.object({ lineId: idField('lineId'), quantity: quantityField }).strict(), { error: 'lines debe ser una lista' })
+      .max(100, 'Una corrección admite hasta 100 líneas'),
+  })
+  .strict();
+
 export const MovementIdParamsSchema = z.object({
   id: z.coerce.number({ error: 'El id debe ser un número' }).int('El id debe ser un entero').positive('El id debe ser positivo'),
 });

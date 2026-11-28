@@ -199,3 +199,39 @@ export const listPendingLoans = async ({ page, limit, assetId, movementId, searc
   ]);
   return { items: rows, total };
 };
+
+// --- Correcciones (HU-406) -----------------------------------------------------------------------
+
+/**
+ * Serializa las correcciones de un mismo movimiento: dos correcciones simultáneas no pueden ver el
+ * mismo saldo por corregir. Dura hasta el fin de la transacción.
+ */
+export const lockCorrectionsOf = async (movementId, { transaction }) => {
+  await sequelize.query("SELECT pg_advisory_xact_lock(hashtext('movements.correction'), :movementId)", { replacements: { movementId }, transaction });
+};
+
+/**
+ * Correcciones registradas de un movimiento (referencia REV-{documento}): sus cabeceras y lo ya
+ * corregido por (producto, activo), que es la clave única de las líneas del original.
+ */
+export const findCorrectionsOf = async (documentNumber, { transaction } = {}) => {
+  const reference = `REV-${documentNumber}`;
+  const [headers, lines] = await Promise.all([
+    sequelize.query(
+      `SELECT id, document_number AS "documentNumber", movement_date AS "movementDate" FROM movement_headers WHERE reference = :reference ORDER BY id`,
+      { replacements: { reference }, type: QueryTypes.SELECT, transaction }
+    ),
+    sequelize.query(
+      `SELECT l.product_id AS "productId", l.asset_id AS "assetId", sum(l.quantity)::text AS quantity
+       FROM movement_lines l JOIN movement_headers h ON h.id = l.movement_header_id
+       WHERE h.reference = :reference
+       GROUP BY l.product_id, l.asset_id`,
+      { replacements: { reference }, type: QueryTypes.SELECT, transaction }
+    ),
+  ]);
+  return { headers, corrected: new Map(lines.map((l) => [`${l.productId}|${l.assetId ?? ''}`, l.quantity])) };
+};
+
+/** id y número del movimiento con ese número de documento, o null. */
+export const findByDocumentNumber = async (documentNumber, { transaction } = {}) =>
+  plain(await MovementHeader.findOne({ where: { documentNumber }, attributes: ['id', 'documentNumber'], transaction }));

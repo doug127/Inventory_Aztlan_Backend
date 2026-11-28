@@ -9,6 +9,9 @@ vi.mock('#src/modules/movement/movement.repository.js', () => ({
   nextWithdrawalReferenceNumber: vi.fn(),
   createMovement: vi.fn(),
   lockLoansOfAssets: vi.fn(),
+  lockCorrectionsOf: vi.fn(),
+  findCorrectionsOf: vi.fn(),
+  findByDocumentNumber: vi.fn(),
   findPendingLoansOfAssets: vi.fn(),
   listPendingLoans: vi.fn(),
   findDocument: vi.fn(),
@@ -64,6 +67,7 @@ beforeEach(() => {
   repo.nextDocumentNumber.mockResolvedValue('RET-000145');
   repo.nextWithdrawalReferenceNumber.mockResolvedValue(7);
   repo.createMovement.mockResolvedValue(1);
+  repo.findCorrectionsOf.mockResolvedValue({ headers: [], corrected: new Map() });
   assertWarehouseAvailable.mockResolvedValue({ id: 2, code: 'COMB', isActive: true });
   assertProductAvailable.mockImplementation(async (id) => PRODUCTS[id]);
   assertAssetAvailable.mockResolvedValue({ id: 1, isActive: true });
@@ -377,6 +381,89 @@ describe('devolución de préstamos (HU-405)', () => {
     await expect(
       service.createEntry(devolution([{ productId: 10, quantity: '1', assetId: 3 }], { documents: [{ documentType: 'FACTURA', documentNumber: '1' }] }), { actor: ALMACENISTA })
     ).rejects.toMatchObject({ code: 'VALIDATION_ERROR', details: [expect.objectContaining({ path: 'documents' })] });
+  });
+});
+
+describe('createCorrection (HU-406)', () => {
+  const original = (overrides = {}) => ({
+    ...storedMovement(9),
+    documentNumber: 'RET-000145',
+    lines: [
+      { id: 21, quantity: '200.000', product: { id: 10, code: 'COMB-0001', name: 'Diésel', unit: { code: 'L' } }, asset: { id: 3, code: 'T-01', name: 'Tractor', category: { id: 1, code: 'TRACTOR', name: 'Tractor' } } },
+      { id: 22, quantity: '8.000', product: { id: 11, code: 'LUBR-0001', name: 'Aceite', unit: { code: 'L' } }, asset: null },
+    ],
+    ...overrides,
+  });
+  const fix = (lines, overrides = {}) => ({ note: 'Se registró de más', lines, ...overrides });
+
+  beforeEach(() => {
+    repo.nextDocumentNumber.mockResolvedValue('ENT-000050');
+    repo.findMovementById.mockImplementation(async (id) => (id === 9 ? original() : storedMovement(id)));
+  });
+
+  it('OUT CONSUMO → IN OTRO al mismo almacén, con el mismo activo y referencia REV-; bloquea antes de leer lo corregido', async () => {
+    await service.createCorrection(9, fix([{ lineId: 21, quantity: '50' }]), { actor: ADMIN });
+    expect(repo.lockCorrectionsOf).toHaveBeenCalledWith(9, { transaction: 'tx' });
+    expect(repo.lockCorrectionsOf.mock.invocationCallOrder[0]).toBeLessThan(repo.findCorrectionsOf.mock.invocationCallOrder.at(-1));
+    expect(repo.createMovement).toHaveBeenCalledWith(
+      expect.objectContaining({
+        movementType: 'IN',
+        reason: 'OTRO',
+        reference: 'REV-RET-000145',
+        warehouseToId: 2,
+        note: 'Se registró de más',
+        lines: [expect.objectContaining({ productId: 10, assetId: 3, quantity: '50.000' })],
+      }),
+      { transaction: 'tx' }
+    );
+    expect(stock.incrementStock).toHaveBeenCalledWith(2, 10, '50.000', { transaction: 'tx' });
+  });
+
+  it('no corrige más de lo que queda: 200 − 160 ya corregidos = 40', async () => {
+    repo.findCorrectionsOf.mockResolvedValue({ headers: [{ id: 30 }], corrected: new Map([['10|3', '160.000']]) });
+    await expect(service.createCorrection(9, fix([{ lineId: 21, quantity: '40.001' }]), { actor: ADMIN })).rejects.toMatchObject({
+      code: 'CORRECTION_EXCEEDS_ORIGINAL',
+      details: [expect.objectContaining({ path: 'lines.0.quantity', available: '40.000', requested: '40.001' })],
+    });
+    expect(repo.createMovement).not.toHaveBeenCalled();
+  });
+
+  it('cada tipo con su inverso: IN → OUT OTRO, TRANSFER → TRANSFER al revés, ADJUST sobrante → faltante', async () => {
+    const run = async (overrides) => {
+      vi.clearAllMocks();
+      repo.findByIdempotencyKey.mockResolvedValue(null);
+      repo.findCorrectionsOf.mockResolvedValue({ headers: [], corrected: new Map() });
+      repo.nextDocumentNumber.mockResolvedValue('XXX-000001');
+      repo.createMovement.mockResolvedValue(1);
+      repo.findMovementById.mockImplementation(async (id) => (id === 9 ? original(overrides) : storedMovement(id)));
+      assertWarehouseAvailable.mockImplementation(async (id) => ({ id, code: `W${id}`, isActive: true }));
+      assertProductAvailable.mockImplementation(async (id) => PRODUCTS[id]);
+      stock.lockStockRows.mockResolvedValue(new Map([[11, '100.000']]));
+      stock.findStockTotals.mockResolvedValue([]);
+      await service.createCorrection(9, fix([{ lineId: 22, quantity: '3' }]), { actor: ADMIN });
+      return repo.createMovement.mock.calls[0][0];
+    };
+    const purchase = { movementType: 'IN', reason: 'COMPRA', documentNumber: 'ENT-000032', fromWarehouse: null, toWarehouse: { id: 5, code: 'PRIN', name: 'Principal' } };
+    expect(await run(purchase)).toMatchObject({ movementType: 'OUT', reason: 'OTRO', reference: 'REV-ENT-000032', warehouseFromId: 5 });
+    const transfer = { movementType: 'TRANSFER', reason: 'TRASLADO', documentNumber: 'TRF-000010', fromWarehouse: { id: 2, code: 'COMB', name: 'C' }, toWarehouse: { id: 5, code: 'PRIN', name: 'P' } };
+    expect(await run(transfer)).toMatchObject({ movementType: 'TRANSFER', reference: 'REV-TRF-000010', warehouseFromId: 5, warehouseToId: 2 });
+    const surplus = { movementType: 'ADJUST', reason: 'AJUSTE', documentNumber: 'AJU-000003', fromWarehouse: null, toWarehouse: { id: 5, code: 'PRIN', name: 'P' } };
+    expect(await run(surplus)).toMatchObject({ movementType: 'ADJUST', reference: 'REV-AJU-000003', warehouseFromId: 5, warehouseToId: null });
+  });
+
+  it('ALMACENISTA → FORBIDDEN_ROLE; una corrección no se corrige; línea ajena o repetida → VALIDATION_ERROR; fecha anterior al original → MOVEMENT_DATE_INVALID', async () => {
+    await expect(service.createCorrection(9, fix([{ lineId: 21, quantity: '1' }]), { actor: ALMACENISTA })).rejects.toMatchObject({ code: 'FORBIDDEN_ROLE' });
+    repo.findMovementById.mockResolvedValueOnce(original({ reference: 'REV-ENT-000032' }));
+    await expect(service.createCorrection(9, fix([{ lineId: 21, quantity: '1' }]), { actor: ADMIN })).rejects.toMatchObject({ code: 'CORRECTION_NOT_ALLOWED' });
+    await expect(service.createCorrection(9, fix([{ lineId: 99, quantity: '1' }]), { actor: ADMIN })).rejects.toMatchObject({
+      code: 'VALIDATION_ERROR',
+      details: [expect.objectContaining({ path: 'lines.0.lineId' })],
+    });
+    await expect(service.createCorrection(9, fix([{ lineId: 21, quantity: '1' }, { lineId: 21, quantity: '1' }]), { actor: ADMIN })).rejects.toMatchObject({ code: 'VALIDATION_ERROR' });
+    await expect(service.createCorrection(9, fix([{ lineId: 21, quantity: '1' }], { movementDate: new Date('2026-11-01T00:00:00Z') }), { actor: ADMIN })).rejects.toMatchObject({
+      code: 'MOVEMENT_DATE_INVALID',
+    });
+    expect(repo.createMovement).not.toHaveBeenCalled();
   });
 });
 

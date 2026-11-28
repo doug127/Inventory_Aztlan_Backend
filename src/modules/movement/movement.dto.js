@@ -19,6 +19,8 @@ export const MovementLineDto = z.object({
     })
     .nullable(),
   note: z.string().nullable(),
+  // Cantidad ya corregida con movimientos inversos (HU-406); lo que queda por corregir es quantity − corrected.
+  corrected: Quantity,
 });
 
 /** Documento de recepción (factura, vale, recibo…). `file` es null mientras no se adjunte el archivo. */
@@ -89,6 +91,9 @@ export const MovementDto = z.object({
   documents: z.array(MovementDocumentDto),
   // Total por producto sumando sus líneas (resumen de la orden y de la impresión).
   totals: z.array(z.object({ product: ProductRef, quantity: Quantity, lines: z.number().int() })),
+  // Correcciones (HU-406): los movimientos REV-{documento} que lo corrigen y, si es una corrección, el original.
+  corrections: z.array(z.object({ id: z.number().int(), documentNumber: z.string(), movementDate: z.date() })),
+  correctionOf: z.object({ id: z.number().int(), documentNumber: z.string() }).nullable(),
 });
 
 const toWarehouse = (w) => (w ? { id: w.id, code: w.code, name: w.name } : null);
@@ -100,7 +105,7 @@ const toThousandths = (quantity) => {
 };
 const fromThousandths = (value) => `${value / 1000n}.${String(value % 1000n).padStart(3, '0')}`;
 
-export const toMovementDto = (movement) => {
+export const toMovementDto = (movement, { corrections = [], corrected = new Map(), correctionOf = null } = {}) => {
   const lines = movement.lines.map((line) => ({
     id: line.id,
     product: { id: line.product.id, code: line.product.code, name: line.product.name, unitCode: line.product.unit.code },
@@ -114,6 +119,7 @@ export const toMovementDto = (movement) => {
         }
       : null,
     note: line.note ?? null,
+    corrected: fromThousandths(toThousandths(String(corrected.get(`${line.product.id}|${line.asset?.id ?? ''}`) ?? '0'))),
   }));
 
   const totals = new Map();
@@ -141,6 +147,8 @@ export const toMovementDto = (movement) => {
     lines,
     documents: (movement.documents ?? []).map(toMovementDocumentDto),
     totals: [...totals.values()].map((t) => ({ product: t.product, quantity: fromThousandths(t.thousandths), lines: t.lines })),
+    corrections: corrections.map((c) => ({ id: c.id, documentNumber: c.documentNumber, movementDate: new Date(c.movementDate) })),
+    correctionOf: correctionOf ? { id: correctionOf.id, documentNumber: correctionOf.documentNumber } : null,
   });
 };
 

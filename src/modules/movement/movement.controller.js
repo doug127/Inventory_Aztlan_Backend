@@ -3,6 +3,16 @@ import { addLogContext, sendFile, sendOk, sendPaginated } from '#src/shared/http
 
 // Sin try/catch: Express 5 lleva cualquier error de una función async al errorHandler.
 
+/** Corrección con un movimiento inverso (HU-406): 201 con el inverso; 200 si el Idempotency-Key ya se usó. */
+export const createCorrectionController = async (req, res) => {
+  const { movement, duplicated, warnings } = await movementService.createCorrection(req.validated.params.id, req.validated.body, {
+    actor: req.user,
+    idempotencyKey: req.validated.headers?.['idempotency-key'],
+  });
+  addLogContext(res, { doc: movement.documentNumber, corrects: req.validated.params.id, lines: movement.lines.length, duplicated });
+  return sendOk(res, movement, { status: duplicated ? 200 : 201, meta: { duplicated, warnings } });
+};
+
 /** Préstamos pendientes de devolver (HU-405). Todos los roles. */
 export const listPendingLoansController = async (req, res) => sendPaginated(res, await movementService.listPendingLoans(req.validated.query));
 

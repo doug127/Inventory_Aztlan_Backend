@@ -28,6 +28,8 @@ export const ERROR_CATALOG = Object.freeze({
   MOVEMENT_DATE_INVALID:         { status: 400, message: 'Fecha del movimiento fuera del rango permitido' },
   MOVEMENT_IMMUTABLE:            { status: 409, message: 'Los movimientos no se modifican ni eliminan' },
   EMPTY_MOVEMENT:                { status: 400, message: 'El movimiento no tiene líneas' },
+  CORRECTION_NOT_ALLOWED:        { status: 409, message: 'Este movimiento no admite corrección' },
+  CORRECTION_EXCEEDS_ORIGINAL:   { status: 409, message: 'La corrección supera lo que queda por corregir de la línea' },
   // 409 solo cuando el UNIQUE detecta una carrera. Si el service encuentra la clave antes de
   // insertar, no lanza error: devuelve el movimiento original con 200.
   DUPLICATE_REQUEST:             { status: 409, message: 'La solicitud ya fue procesada' },

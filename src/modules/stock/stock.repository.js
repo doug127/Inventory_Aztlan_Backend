@@ -73,3 +73,75 @@ export const findAvailability = async (warehouseId, productIds) => {
     { replacements: { warehouseId, productIds }, type: QueryTypes.SELECT }
   );
 };
+
+// --- Consulta de existencias (HU-407) ---------------------------------------------------------
+
+/**
+ * Estado de un producto según su stock total en todos los almacenes (business_rules.md §7), el mismo
+ * criterio que v_stock_alerts.
+ */
+const STATUS_SQL = `CASE WHEN COALESCE(t.total, 0) < p.min_stock THEN 'BAJO_MINIMO'
+                         WHEN p.max_stock IS NOT NULL AND COALESCE(t.total, 0) > p.max_stock THEN 'SOBRE_MAXIMO'
+                         ELSE 'NORMAL' END`;
+
+/**
+ * Existencias de los productos activos, filtradas y paginadas.
+ *  - groupBy 'product': una fila por producto con su total y el desglose por almacén. Con warehouseId,
+ *    solo los productos con existencia en ese almacén, y quantity es la de ese almacén.
+ *  - groupBy 'warehouse': una fila por producto y almacén con existencia (> 0).
+ * status filtra por estado ('BAJO_MINIMO', 'SOBRE_MAXIMO' o 'CON_ALERTA'). summary cuenta los
+ * productos por estado con los mismos filtros, sin el de estado.
+ */
+export const listStock = async ({ groupBy, page, limit, search, warehouseId, categoryIds, status }) => {
+  const byWarehouse = groupBy === 'warehouse';
+  const where = ['p.is_active'];
+  if (categoryIds) where.push('p.product_category_id IN (:categoryIds)');
+  if (search) where.push('(p.code ILIKE :pattern OR p.name ILIKE :pattern)');
+  if (byWarehouse) {
+    where.push('s.quantity > 0');
+    if (warehouseId) where.push('s.warehouse_id = :warehouseId');
+  } else if (warehouseId) {
+    where.push('ws.quantity > 0');
+  }
+  const base = `
+    SELECT p.id AS "productId", p.code AS "productCode", p.name AS "productName", u.code AS "unitCode",
+           c.id AS "categoryId", c.code AS "categoryCode", c.name AS "categoryName",
+           p.min_stock::text AS "minStock", p.max_stock::text AS "maxStock",
+           COALESCE(t.total, 0)::text AS total,
+           ${STATUS_SQL} AS status,
+           ${
+             byWarehouse
+               ? `w.id AS "warehouseId", w.code AS "warehouseCode", w.name AS "warehouseName", s.quantity::text AS quantity, NULL::json AS warehouses`
+               : `${warehouseId ? `w.id AS "warehouseId", w.code AS "warehouseCode", w.name AS "warehouseName", ws.quantity::text` : `NULL::int AS "warehouseId", NULL AS "warehouseCode", NULL AS "warehouseName", COALESCE(t.total, 0)::text`} AS quantity,
+                  (SELECT json_agg(json_build_object('id', w2.id, 'code', w2.code, 'name', w2.name, 'quantity', s2.quantity::text) ORDER BY w2.code)
+                   FROM stock s2 JOIN warehouses w2 ON w2.id = s2.warehouse_id
+                   WHERE s2.product_id = p.id AND s2.quantity > 0) AS warehouses`
+           }
+    FROM products p
+    JOIN units u ON u.id = p.unit_id
+    JOIN product_categories c ON c.id = p.product_category_id
+    LEFT JOIN (SELECT product_id, sum(quantity) AS total FROM stock GROUP BY product_id) t ON t.product_id = p.id
+    ${byWarehouse ? 'JOIN stock s ON s.product_id = p.id JOIN warehouses w ON w.id = s.warehouse_id' : ''}
+    ${!byWarehouse && warehouseId ? 'JOIN stock ws ON ws.product_id = p.id AND ws.warehouse_id = :warehouseId JOIN warehouses w ON w.id = ws.warehouse_id' : ''}
+    WHERE ${where.join(' AND ')}`;
+  const statusWhere =
+    status === 'CON_ALERTA' ? "WHERE x.status <> 'NORMAL'" : status ? 'WHERE x.status = :status' : '';
+  const replacements = {
+    categoryIds,
+    warehouseId,
+    status,
+    pattern: search ? `%${search.replace(/[\%_]/g, (ch) => `\${ch}`)}%` : null,
+    limit,
+    offset: (page - 1) * limit,
+  };
+  const [rows, [{ total }], summaryRows] = await Promise.all([
+    sequelize.query(`SELECT * FROM (${base}) x ${statusWhere} ORDER BY x."productCode", x."warehouseCode" NULLS FIRST LIMIT :limit OFFSET :offset`, {
+      replacements,
+      type: QueryTypes.SELECT,
+    }),
+    sequelize.query(`SELECT count(*)::int AS total FROM (${base}) x ${statusWhere}`, { replacements, type: QueryTypes.SELECT }),
+    // El resumen cuenta productos (no filas): en la vista por almacén un producto aparece varias veces.
+    sequelize.query(`SELECT x.status, count(DISTINCT x."productId")::int AS count FROM (${base}) x GROUP BY x.status`, { replacements, type: QueryTypes.SELECT }),
+  ]);
+  return { items: rows, total, summary: summaryRows };
+};

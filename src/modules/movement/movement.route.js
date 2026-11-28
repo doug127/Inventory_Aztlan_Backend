@@ -7,6 +7,7 @@ import { ROLE_CODES } from '#src/shared/constants/roles.js';
 import { RECEIPT_FILE_MAX_BYTES, RECEIPT_FILE_MIME_TYPES } from '#src/shared/constants/movements.js';
 import {
   CreateAdjustmentSchema,
+  CreateCorrectionSchema,
   CreateEntrySchema,
   CreateTransferSchema,
   CreateWithdrawalSchema,
@@ -20,6 +21,7 @@ import {
 import {
   attachDocumentFileController,
   createAdjustmentController,
+  createCorrectionController,
   createEntryController,
   createTransferController,
   createWithdrawalController,
@@ -63,6 +65,13 @@ router.post(
 // Préstamos pendientes de devolver (HU-405): todos los roles. Va antes de /:id.
 router.get('/loans/pending', validate({ query: ListPendingLoansQuerySchema }), listPendingLoansController);
 router.get('/:id', validate({ params: MovementIdParamsSchema }), getMovementController);
+// Corrección con un movimiento inverso (REV-{documento}): solo ADMIN y SUPERADMIN (business_rules.md §5).
+router.post(
+  '/:id/corrections',
+  authorizeRole(ROLE_CODES.ADMIN),
+  validate({ params: MovementIdParamsSchema, headers: IdempotencyHeadersSchema, body: CreateCorrectionSchema }),
+  createCorrectionController
+);
 
 // Archivo de un documento de recepción (factura, vale, recibo). El cuerpo es el archivo crudo.
 router.put(
