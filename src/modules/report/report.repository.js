@@ -1,7 +1,7 @@
-// Consultas de los reportes (HU-501). SQL crudo: agregaciones sobre las líneas de movimientos.
+// Consultas de los reportes (HU-501 y HU-502). SQL crudo: agregaciones sobre las líneas de movimientos.
 import { QueryTypes } from 'sequelize';
 import { sequelize } from '#src/config/database.js';
-import { dayBounds } from '#src/shared/schemas/dates.js';
+import { SERVER_TIME_ZONE, dayBounds } from '#src/shared/schemas/dates.js';
 import { CORRECTION_REFERENCE_PREFIX } from '#src/shared/constants/movements.js';
 
 /**
@@ -116,4 +116,96 @@ export const findConsumption = async ({ groupBy, from, to, productId, productCat
     }),
   ]);
   return { items: rows, total: rows[0]?.totalItems ?? 0, products, groups: counts.groups, lines: counts.lines };
+};
+
+// --- Movimientos por período (HU-502) ------------------------------------------------------------
+
+/**
+ * Patas firmadas de cada línea por almacén, como v_kardex pero con el id de la línea y la referencia:
+ * una entrada suma en destino, una salida resta en origen, un traslado resta en origen y suma en
+ * destino, y un ajuste suma (SOBRANTE) o resta (FALTANTE). Con almacén, solo cuentan sus patas.
+ */
+const movementLegsSql = (where) => `
+  SELECT h.id AS movement_id, h.movement_type::text AS movement_type, h.reason::text AS reason, h.movement_date, h.reference,
+         l.id AS line_id, l.product_id, k.warehouse_id, k.delta
+  FROM movement_headers h
+  JOIN movement_lines l ON l.movement_header_id = h.id
+  CROSS JOIN LATERAL (VALUES (h.warehouse_from_id, -l.quantity), (h.warehouse_to_id, l.quantity)) AS k(warehouse_id, delta)
+  WHERE k.warehouse_id IS NOT NULL ${where.map((condition) => `AND ${condition}`).join(' ')}`;
+
+const signedSum = (filter, sign = '') => `COALESCE(${sign}sum(x.delta) FILTER (WHERE ${filter}), 0)::text`;
+
+const MOVEMENT_SUMS = `
+  ${signedSum("x.movement_type = 'IN'")} AS entries,
+  ${signedSum("x.movement_type = 'OUT'", '-')} AS exits,
+  ${signedSum("x.movement_type = 'TRANSFER' AND x.delta > 0")} AS "transfersIn",
+  ${signedSum("x.movement_type = 'TRANSFER' AND x.delta < 0", '-')} AS "transfersOut",
+  ${signedSum("x.movement_type = 'ADJUST' AND x.delta > 0")} AS "adjustmentsIn",
+  ${signedSum("x.movement_type = 'ADJUST' AND x.delta < 0", '-')} AS "adjustmentsOut",
+  COALESCE(sum(x.delta), 0)::text AS net,
+  count(DISTINCT x.movement_id)::int AS documents,
+  count(DISTINCT x.line_id)::int AS lines`;
+
+const TYPE_ORDER = `array_position(ARRAY['IN', 'OUT', 'TRANSFER', 'ADJUST'], x.movement_type)`;
+
+/**
+ * Movimientos del período por producto (paginado), con el resumen de todo el alcance: totales, conteo
+ * por tipo y motivo (con cuántos son correcciones REV-) y la serie por día, semana o mes en la hora
+ * del servidor. Filtros: from y to ('AAAA-MM-DD' inclusive), movementType, reason, warehouseId,
+ * productId y productCategoryIds (ya con subcategorías). Las cantidades vuelven como texto NUMERIC.
+ */
+export const findMovementsSummary = async ({ from, to, movementType, reason, warehouseId, productId, productCategoryIds, interval, page, limit }) => {
+  const where = [
+    from && 'h.movement_date >= :fromStart',
+    to && 'h.movement_date < :toEnd',
+    movementType && 'h.movement_type = :movementType',
+    reason && 'h.reason = :reason',
+    warehouseId && 'k.warehouse_id = :warehouseId',
+    productId && 'l.product_id = :productId',
+    productCategoryIds && 'l.product_id IN (SELECT id FROM products WHERE product_category_id IN (:productCategoryIds))',
+  ].filter(Boolean);
+  const scope = `WITH x AS (${movementLegsSql(where)})`;
+  const replacements = {
+    ...dayBounds({ from, to }),
+    movementType,
+    reason,
+    warehouseId,
+    productId,
+    productCategoryIds,
+    interval,
+    timeZone: SERVER_TIME_ZONE,
+    limit,
+    offset: (page - 1) * limit,
+  };
+  const select = (sql) => sequelize.query(sql, { replacements, type: QueryTypes.SELECT });
+
+  const [rows, [totals], byReason, byPeriod] = await Promise.all([
+    select(
+      `${scope}
+       SELECT ${PRODUCT_JSON} AS product, ${MOVEMENT_SUMS}, max(x.movement_date) AS "lastMovementAt", count(*) OVER ()::int AS "totalItems"
+       FROM x JOIN products p ON p.id = x.product_id JOIN units u ON u.id = p.unit_id
+       GROUP BY p.id, p.code, p.name, u.code
+       ORDER BY p.code COLLATE natural_sort, p.id
+       LIMIT :limit OFFSET :offset`
+    ),
+    select(`${scope} SELECT count(DISTINCT movement_id)::int AS documents, count(DISTINCT line_id)::int AS lines, count(DISTINCT product_id)::int AS products FROM x`),
+    select(
+      `${scope}
+       SELECT x.movement_type AS "movementType", x.reason, count(DISTINCT x.movement_id)::int AS documents, count(DISTINCT x.line_id)::int AS lines,
+              count(DISTINCT x.movement_id) FILTER (WHERE x.reference LIKE '${CORRECTION_REFERENCE_PREFIX}%')::int AS corrections
+       FROM x GROUP BY x.movement_type, x.reason
+       ORDER BY ${TYPE_ORDER}, x.reason`
+    ),
+    select(
+      `${scope}
+       SELECT to_char(date_trunc(:interval, x.movement_date AT TIME ZONE :timeZone), 'YYYY-MM-DD') AS period,
+              count(DISTINCT x.movement_id) FILTER (WHERE x.movement_type = 'IN')::int AS "IN",
+              count(DISTINCT x.movement_id) FILTER (WHERE x.movement_type = 'OUT')::int AS "OUT",
+              count(DISTINCT x.movement_id) FILTER (WHERE x.movement_type = 'TRANSFER')::int AS "TRANSFER",
+              count(DISTINCT x.movement_id) FILTER (WHERE x.movement_type = 'ADJUST')::int AS "ADJUST",
+              count(DISTINCT x.movement_id)::int AS documents
+       FROM x GROUP BY 1 ORDER BY 1`
+    ),
+  ]);
+  return { items: rows, total: rows[0]?.totalItems ?? 0, totals, byReason, byPeriod };
 };

@@ -41,3 +41,9 @@ export const dayBounds = ({ from, to }) => {
   };
   return { fromStart: from ? start(from) : undefined, toEnd: to ? end(to) : undefined };
 };
+
+/**
+ * Zona horaria del servidor (la de la finca). Los cortes por día, semana o mes en SQL se hacen en
+ * ella: `date_trunc(:interval, movement_date AT TIME ZONE :timeZone)` (HU-502).
+ */
+export const SERVER_TIME_ZONE = Intl.DateTimeFormat().resolvedOptions().timeZone;
