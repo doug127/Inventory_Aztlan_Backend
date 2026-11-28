@@ -7,6 +7,7 @@ import unitRoutes from '#src/modules/product/unit/unit.route.js';
 import productRoutes from '#src/modules/product/product.route.js';
 import stockRoutes from '#src/modules/stock/stock.route.js';
 import movementRoutes from '#src/modules/movement/movement.route.js';
+import reportRoutes from '#src/modules/report/report.route.js';
 import assetCategoryRoutes from '#src/modules/asset/asset_category/asset_category.route.js';
 import assetRouter from '#src/modules/asset/asset.route.js';
 import devRoutes from '#src/modules/dev/dev.route.js';
@@ -24,6 +25,7 @@ routes.use('/products', productRoutes);
 routes.use('/stock', stockRoutes);
 routes.use('/asset-categories', assetCategoryRoutes);
 routes.use('/assets', assetRouter);
+routes.use('/reports', reportRoutes);
 routes.use('/security-events', securityEventRoutes);
 // Solo desarrollo (NODE_ENV != production, ENABLE_DEV_TOOLS=true y desde localhost); si no, 404.
 routes.use('/dev', devRoutes);

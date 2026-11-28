@@ -2,6 +2,7 @@
 // decide con las filas ya bloqueadas. Las cantidades NUMERIC(14,3) viajan como texto.
 import { QueryTypes } from 'sequelize';
 import { sequelize } from '#src/config/database.js';
+import { dayBounds } from '#src/shared/schemas/dates.js';
 
 /**
  * Bloquea FOR UPDATE las filas de stock de esos productos en el almacén, en orden ascendente de
@@ -161,9 +162,9 @@ const KARDEX_ORDER = 'k.movement_date, k.movement_id, k.delta, k.asset_id NULLS 
  */
 export const findKardex = async ({ productId, warehouseId, from, to, page, limit }) => {
   const scope = `k.product_id = :productId${warehouseId ? ' AND k.warehouse_id = :warehouseId' : ''}`;
-  const range = [from && 'x.movement_date >= CAST(:from AS date)', to && 'x.movement_date < CAST(:to AS date) + 1'].filter(Boolean);
+  const range = [from && 'x.movement_date >= :fromStart', to && 'x.movement_date < :toEnd'].filter(Boolean);
   const rangeWhere = range.length ? `WHERE ${range.join(' AND ')}` : '';
-  const replacements = { productId, warehouseId, from, to, limit, offset: (page - 1) * limit };
+  const replacements = { productId, warehouseId, ...dayBounds({ from, to }), limit, offset: (page - 1) * limit };
   const running = `
     SELECT k.*, sum(k.delta) OVER (ORDER BY ${KARDEX_ORDER} ROWS UNBOUNDED PRECEDING) AS balance,
            row_number() OVER (ORDER BY ${KARDEX_ORDER}) AS rn
@@ -186,7 +187,7 @@ export const findKardex = async ({ productId, warehouseId, from, to, page, limit
     ),
     sequelize.query(
       `SELECT count(*) FILTER (WHERE ${range.length ? range.join(' AND ') : 'true'})::int AS total,
-              COALESCE(sum(x.delta) FILTER (WHERE ${from ? 'x.movement_date < CAST(:from AS date)' : 'false'}), 0)::text AS opening,
+              COALESCE(sum(x.delta) FILTER (WHERE ${from ? 'x.movement_date < :fromStart' : 'false'}), 0)::text AS opening,
               COALESCE(sum(x.delta) FILTER (WHERE x.delta > 0 AND ${range.length ? range.join(' AND ') : 'true'}), 0)::text AS "inQty",
               COALESCE(-sum(x.delta) FILTER (WHERE x.delta < 0 AND ${range.length ? range.join(' AND ') : 'true'}), 0)::text AS "outQty"
        FROM v_kardex x WHERE ${scope.replaceAll('k.', 'x.')}`,

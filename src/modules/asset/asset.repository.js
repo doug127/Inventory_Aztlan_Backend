@@ -211,10 +211,11 @@ export const updateAsset = async (id, changes, { transaction } = {}) => {
 // --- Ficha del activo: consumos e historial (HU-304) ------------------------------
 
 // Clase de cada línea para el activo (shared/constants/movements.js, ASSET_LINE_KINDS). El consumo
-// neto (business_rules.md §5) es CONSUMO − CORRECCION.
+// neto (business_rules.md §5) es CONSUMO − CORRECCION. CORRECCION es la IN OTRO que corrige una OUT
+// CONSUMO (referencia REV-{documento}); la que corrige un desecho o una venta no resta consumo (HU-501).
 const LINE_KIND_SQL = `CASE
     WHEN h.movement_type = 'OUT' AND h.reason = 'CONSUMO' THEN 'CONSUMO'
-    WHEN h.movement_type = 'IN' AND h.reason = 'OTRO' AND h.reference LIKE '${CORRECTION_REFERENCE_PREFIX}%' THEN 'CORRECCION'
+    WHEN h.movement_type = 'IN' AND h.reason = 'OTRO' AND o.movement_type = 'OUT' AND o.reason = 'CONSUMO' THEN 'CORRECCION'
     WHEN h.movement_type = 'OUT' AND h.reason = 'PRESTAMO' THEN 'PRESTAMO'
     WHEN h.movement_type = 'IN' AND h.reason = 'DEVOLUCION' THEN 'DEVOLUCION'
     ELSE 'OTRO'
@@ -226,6 +227,8 @@ const assetLinesSql = ({ from, to }) => `
          h.reason, h.reference, h.movement_date, h.warehouse_from_id, h.warehouse_to_id, h.received_by,
          h.created_by_user_id, ${LINE_KIND_SQL} AS kind
   FROM movement_lines l JOIN movement_headers h ON h.id = l.movement_header_id
+  LEFT JOIN movement_headers o
+    ON h.movement_type = 'IN' AND h.reason = 'OTRO' AND h.reference = '${CORRECTION_REFERENCE_PREFIX}' || o.document_number
   WHERE l.asset_id = :id
     ${from ? 'AND h.movement_date >= :from' : ''}
     ${to ? 'AND h.movement_date < :to' : ''}`;

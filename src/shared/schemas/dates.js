@@ -25,3 +25,19 @@ export const dateParam = (name, { endOfDay = false } = {}) =>
 /** Período { from, to } con `from` anterior a `to`; los dos son opcionales. */
 export const periodFields = { from: dateParam('from'), to: dateParam('to', { endOfDay: true }) };
 export const periodIsOrdered = [(q) => !q.from || !q.to || q.from < q.to, { error: 'from debe ser anterior a to', path: ['from'] }];
+
+/**
+ * Límites de un rango de días 'AAAA-MM-DD' inclusive, en la hora del servidor (la de la finca):
+ * { fromStart, toEnd } con fromStart = inicio de `from` y toEnd = inicio del día siguiente a `to`,
+ * para comparar `movement_date >= :fromStart AND movement_date < :toEnd`. No se usa CAST(:d AS date)
+ * en SQL porque la sesión de PostgreSQL está en UTC y corre el día 4 horas (HU-501).
+ */
+export const dayBounds = ({ from, to }) => {
+  const start = (day) => new Date(`${day}T00:00:00`);
+  const end = (day) => {
+    const date = start(day);
+    date.setDate(date.getDate() + 1);
+    return date;
+  };
+  return { fromStart: from ? start(from) : undefined, toEnd: to ? end(to) : undefined };
+};

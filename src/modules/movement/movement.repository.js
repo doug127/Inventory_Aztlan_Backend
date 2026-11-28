@@ -2,6 +2,7 @@
 // errores de negocio: el service decide. Los movimientos son inmutables: aquí solo hay INSERT y SELECT.
 import { QueryTypes, Transaction } from 'sequelize';
 import { sequelize } from '#src/config/database.js';
+import { dayBounds } from '#src/shared/schemas/dates.js';
 import { Asset, AssetCategory, MovementDocument, MovementHeader, MovementLine, Product, Unit, User, Warehouse } from '#src/database/models/index.model.js';
 
 const plain = (row) => (row ? row.get({ plain: true }) : null);
@@ -241,7 +242,7 @@ export const findByDocumentNumber = async (documentNumber, { transaction } = {})
 /**
  * Historial de movimientos, del más reciente al más antiguo, paginado. Filtros (todos opcionales):
  * movementType, reason, warehouseId (origen o destino), from/to ('AAAA-MM-DD', ambos inclusive, en la
- * zona horaria de la base), userId (quien registró), assetId y productId (alguna línea con ese activo
+ * hora del servidor), userId (quien registró), assetId y productId (alguna línea con ese activo
  * o producto) y search (número de documento o referencia).
  */
 export const listMovements = async ({ page, limit, movementType, reason, warehouseId, from, to, userId, assetId, productId, search }) => {
@@ -249,8 +250,8 @@ export const listMovements = async ({ page, limit, movementType, reason, warehou
   if (movementType) where.push('h.movement_type = :movementType');
   if (reason) where.push('h.reason = :reason');
   if (warehouseId) where.push('(h.warehouse_from_id = :warehouseId OR h.warehouse_to_id = :warehouseId)');
-  if (from) where.push('h.movement_date >= CAST(:from AS date)');
-  if (to) where.push("h.movement_date < CAST(:to AS date) + 1");
+  if (from) where.push('h.movement_date >= :fromStart');
+  if (to) where.push("h.movement_date < :toEnd");
   if (userId) where.push('h.created_by_user_id = :userId');
   if (assetId) where.push('EXISTS (SELECT 1 FROM movement_lines l WHERE l.movement_header_id = h.id AND l.asset_id = :assetId)');
   if (productId) where.push('EXISTS (SELECT 1 FROM movement_lines l WHERE l.movement_header_id = h.id AND l.product_id = :productId)');
@@ -260,8 +261,7 @@ export const listMovements = async ({ page, limit, movementType, reason, warehou
     movementType,
     reason,
     warehouseId,
-    from,
-    to,
+    ...dayBounds({ from, to }),
     userId,
     assetId,
     productId,
